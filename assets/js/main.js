@@ -4,11 +4,11 @@ class ThemeManager {
         this.theme = localStorage.getItem('theme') || this.getSystemTheme();
         this.init();
     }
-    
+
     init() {
         // Apply initial theme
         this.applyTheme(this.theme);
-        
+
         // Listen for system theme changes
         window.matchMedia('(prefers-color-scheme: dark)')
             .addEventListener('change', (e) => {
@@ -16,45 +16,45 @@ class ThemeManager {
                     this.toggleTheme(e.matches ? 'dark' : 'light');
                 }
             });
-        
+
         // Setup theme toggle button if exists
         const toggleBtn = document.getElementById('theme-toggle');
         if (toggleBtn) {
             toggleBtn.addEventListener('click', () => this.toggleTheme());
         }
     }
-    
+
     getSystemTheme() {
         return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
-    
+
     applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
         this.theme = theme;
-        
+
         // Update icon
         const icon = document.querySelector('#theme-toggle-icon');
         if (icon) {
             icon.textContent = theme === 'dark' ? '☀️' : '🌙';
         }
-        
+
         // Update aria-label for accessibility
         const toggleBtn = document.getElementById('theme-toggle');
         if (toggleBtn) {
-            toggleBtn.setAttribute('aria-label', 
+            toggleBtn.setAttribute('aria-label',
                 theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
         }
     }
-    
+
     toggleTheme(newTheme = null) {
         const theme = newTheme || (this.theme === 'light' ? 'dark' : 'light');
         this.applyTheme(theme);
         localStorage.setItem('theme', theme);
-        
+
         // Dispatch custom event
         window.dispatchEvent(new CustomEvent('themechange', { detail: { theme } }));
     }
-    
+
     getCurrentTheme() {
         return this.theme;
     }
@@ -62,10 +62,13 @@ class ThemeManager {
 
 // Language Manager
 function changeLanguage(lang) {
-    // Save to cookie
-    document.cookie = `lang=${lang}; path=/; max-age=31536000`;
-    // Reload page to apply new language
-    window.location.reload();
+    if (window.i18n) {
+        window.i18n.setLanguage(lang);
+    } else {
+        // Fallback if i18n not loaded
+        document.cookie = `lang=${lang}; path=/; max-age=31536000`;
+        window.location.reload();
+    }
 }
 
 // Toast Notification System
@@ -73,7 +76,7 @@ class ToastManager {
     constructor() {
         this.container = this.createContainer();
     }
-    
+
     createContainer() {
         let container = document.getElementById('toast-container');
         if (!container) {
@@ -84,7 +87,7 @@ class ToastManager {
         }
         return container;
     }
-    
+
     show(message, type = 'info', duration = 3000) {
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
@@ -94,16 +97,16 @@ class ToastManager {
                 <span>${message}</span>
             </div>
         `;
-        
+
         this.container.appendChild(toast);
-        
+
         // Auto remove after duration
         setTimeout(() => {
             toast.style.animation = 'slideOut 0.3s ease';
             setTimeout(() => toast.remove(), 300);
         }, duration);
     }
-    
+
     getIcon(type) {
         const icons = {
             success: '✓',
@@ -120,19 +123,19 @@ class EmailViewerManager {
     constructor() {
         this.viewer = document.querySelector('.email-viewer-container');
         this.backButton = document.getElementById('email-back-btn');
-        
+
         if (this.backButton) {
             this.backButton.addEventListener('click', () => this.close());
         }
     }
-    
+
     open() {
         if (this.viewer) {
             this.viewer.classList.add('active');
             document.body.style.overflow = 'hidden'; // Prevent scroll on mobile
         }
     }
-    
+
     close() {
         if (this.viewer) {
             this.viewer.classList.remove('active');
@@ -142,7 +145,7 @@ class EmailViewerManager {
 }
 
 // Confirmation Dialog
-function confirm Dialog(message, onConfirm, onCancel) {
+function confirmDialog(message, onConfirm, onCancel) {
     const overlay = document.createElement('div');
     overlay.style.cssText = `
         position: fixed;
@@ -156,7 +159,7 @@ function confirm Dialog(message, onConfirm, onCancel) {
         justify-content: center;
         z-index: 3000;
     `;
-    
+
     const dialog = document.createElement('div');
     dialog.style.cssText = `
         background: var(--bg-primary);
@@ -166,7 +169,7 @@ function confirm Dialog(message, onConfirm, onCancel) {
         width: 90%;
         box-shadow: 0 4px 20px var(--shadow);
     `;
-    
+
     dialog.innerHTML = `
         <p style="margin-bottom: 1.5rem; color: var(--text-primary);">${message}</p>
         <div style="display: flex; gap: 1rem; justify-content: flex-end;">
@@ -174,20 +177,20 @@ function confirm Dialog(message, onConfirm, onCancel) {
             <button class="btn btn-primary" id="confirm-btn">Confirm</button>
         </div>
     `;
-    
+
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
-    
+
     dialog.querySelector('#confirm-btn').addEventListener('click', () => {
         overlay.remove();
         if (onConfirm) onConfirm();
     });
-    
+
     dialog.querySelector('#cancel-btn').addEventListener('click', () => {
         overlay.remove();
         if (onCancel) onCancel();
     });
-    
+
     overlay.addEventListener('click', (e) => {
         if (e.target === overlay) {
             overlay.remove();
@@ -198,8 +201,9 @@ function confirm Dialog(message, onConfirm, onCancel) {
 
 // Email Actions
 const EmailActions = {
-    delete: function(emailId, folder) {
-        confirmDialog('このメールを削除してもよろしいですか？', () => {
+    delete: function (emailId, folder) {
+        const message = window.i18n ? window.i18n.t('confirm_delete_email', 'このメールを削除してもよろしいですか？') : 'このメールを削除してもよろしいですか？';
+        confirmDialog(message, () => {
             fetch(`/api/email/${emailId}`, {
                 method: 'DELETE',
                 headers: {
@@ -207,26 +211,74 @@ const EmailActions = {
                     'X-Folder': folder
                 }
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    toastManager.show('メールを削除しました', 'success');
-                    // Remove email from list
-                    document.querySelector(`[data-email-id="${emailId}"]`)?.remove();
-                } else {
-                    toastManager.show('削除に失敗しました', 'error');
-                }
-            })
-            .catch(error => {
-                console.error('Delete error:', error);
-                toastManager.show('エラーが発生しました', 'error');
-            });
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const msg = window.i18n ? window.i18n.t('message_deleted', 'メールを削除しました') : 'メールを削除しました';
+                        toastManager.show(msg, 'success');
+                        // Remove email from list
+                        document.querySelector(`[data-email-id="${emailId}"]`)?.remove();
+                    } else {
+                        const msg = window.i18n ? window.i18n.t('error_delete_failed', '削除に失敗しました') : '削除に失敗しました';
+                        toastManager.show(msg, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Delete error:', error);
+                    const msg = window.i18n ? window.i18n.t('message_error', 'エラーが発生しました') : 'エラーが発生しました';
+                    toastManager.show(msg, 'error');
+                });
         });
     },
-    
-    getToken: function() {
-        // Get token from page data or cookie
-        return document.body.dataset.token || '';
+
+    reply: function (emailId, folder) {
+        this.fetchAndOpenCompose(`/api/reply/${emailId}`, folder);
+    },
+
+    replyAll: function (emailId, folder) {
+        this.fetchAndOpenCompose(`/api/reply-all/${emailId}`, folder);
+    },
+
+    forward: function (emailId, folder) {
+        this.fetchAndOpenCompose(`/api/forward/${emailId}`, folder);
+    },
+
+    move: function (emailId, folder) {
+        // Dispatch event to open Move Modal
+        window.dispatchEvent(new CustomEvent('open-move-modal', {
+            detail: { emailId, currentFolder: folder }
+        }));
+    },
+
+    fetchAndOpenCompose: function (url, folder) {
+        fetch(url, {
+            headers: {
+                'Authorization': `Bearer ${this.getToken()}`,
+                'X-CSRF-Token': this.getCSRFToken(),
+                'X-Folder': folder
+            }
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    window.dispatchEvent(new CustomEvent('open-compose-with-data', { detail: data.data }));
+                } else {
+                    toastManager.show(data.error || 'Failed to load data', 'error');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                toastManager.show('Network error', 'error');
+            });
+    },
+
+    getToken: function () {
+        // Get token from page data or cookie or localStorage
+        return localStorage.getItem('token') || document.body.dataset.token || '';
+    },
+
+    getCSRFToken: function () {
+        return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     }
 };
 
@@ -234,16 +286,27 @@ const EmailActions = {
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize theme manager
     window.themeManager = new ThemeManager();
-    
+
     // Initialize toast manager
     window.toastManager = new ToastManager();
-    
+
     // Initialize email viewer manager (mobile)
     if (window.innerWidth < 768) {
         window.emailViewerManager = new EmailViewerManager();
     }
-    
+
     // HTMX event listeners
+    document.body.addEventListener('htmx:configRequest', function (evt) {
+        // Add CSRF Token
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        if (csrfToken) {
+            evt.detail.headers['X-CSRF-Token'] = csrfToken;
+        }
+
+        // Add Authorization (existing code in main.html script might handle this, but safe to double check)
+        // Note: main.html has a configRequest listener too.
+    });
+
     document.body.addEventListener('htmx:afterSwap', (event) => {
         // Open email viewer on mobile
         if (event.detail.target.id === 'email-viewer' && window.innerWidth < 768) {
@@ -252,7 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-    
+
     // Handle window resize
     let resizeTimeout;
     window.addEventListener('resize', () => {

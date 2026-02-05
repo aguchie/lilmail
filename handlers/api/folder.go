@@ -47,10 +47,34 @@ func (h *FolderHandler) CreateFolder(c *fiber.Ctx) error {
 		})
 	}
 
-	// NOTE: Folder creation requires IMAP client support which is not yet implemented
-	// This is a placeholder for future implementation
-	return c.Status(501).JSON(fiber.Map{
-		"error": "Folder creation is not yet supported",
+	// Get session credentials
+	credentials, err := GetCredentials(c, h.store, h.config.Encryption.Key)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Invalid session",
+		})
+	}
+
+	// Create IMAP client
+	client, err := createIMAPClientFromCredentials(credentials, h.config)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to connect to email server",
+		})
+	}
+	defer client.Close()
+
+	// Create folder
+	if err := client.CreateFolder(req.Name); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to create folder: " + err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Folder created successfully",
+		"folder":  req.Name,
 	})
 }
 
@@ -73,10 +97,33 @@ func (h *FolderHandler) DeleteFolder(c *fiber.Ctx) error {
 		}
 	}
 
-	// NOTE: Folder deletion requires IMAP client support which is not yet implemented
-	// This is a placeholder for future implementation
-	return c.Status(501).JSON(fiber.Map{
-		"error": "Folder deletion is not yet supported",
+	// Get session credentials
+	credentials, err := GetCredentials(c, h.store, h.config.Encryption.Key)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Invalid session",
+		})
+	}
+
+	// Create IMAP client
+	client, err := createIMAPClientFromCredentials(credentials, h.config)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to connect to email server",
+		})
+	}
+	defer client.Close()
+
+	// Delete folder
+	if err := client.DeleteFolder(folderName); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to delete folder: " + err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Folder deleted successfully",
 	})
 }
 
@@ -105,9 +152,34 @@ func (h *FolderHandler) RenameFolder(c *fiber.Ctx) error {
 		}
 	}
 
-	// NOTE: Folder renaming requires IMAP client support which is not yet implemented
-	// This is a placeholder for future implementation
-	return c.Status(501).JSON(fiber.Map{
-		"error": "Folder renaming is not yet supported",
+	// Get session credentials
+	credentials, err := GetCredentials(c, h.store, h.config.Encryption.Key)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Invalid session",
+		})
+	}
+
+	// Create IMAP client
+	client, err := createIMAPClientFromCredentials(credentials, h.config)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to connect to email server",
+		})
+	}
+	defer client.Close()
+
+	// Rename folder
+	if err := client.RenameFolder(req.OldName, req.NewName); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to rename folder: " + err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Folder renamed successfully",
+		"oldName": req.OldName,
+		"newName": req.NewName,
 	})
 }

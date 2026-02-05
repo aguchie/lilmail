@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"lilmail/config"
 	"lilmail/handlers/api"
+	"lilmail/models"
+	"lilmail/storage"
 	"lilmail/utils"
 	"log"
 	"os"
@@ -17,16 +19,20 @@ import (
 )
 
 type AuthHandler struct {
-	store  *session.Store
-	config *config.Config
-	client *api.Client
+	store          *session.Store
+	config         *config.Config
+	client         *api.Client
+	userStorage    *storage.UserStorage
+	accountStorage *storage.AccountStorage
 }
 
 // NewAuthHandler creates a new instance of AuthHandler
-func NewAuthHandler(store *session.Store, config *config.Config) *AuthHandler {
+func NewAuthHandler(store *session.Store, config *config.Config, userStorage *storage.UserStorage, accountStorage *storage.AccountStorage) *AuthHandler {
 	return &AuthHandler{
-		store:  store,
-		config: config,
+		store:          store,
+		config:         config,
+		userStorage:    userStorage,
+		accountStorage: accountStorage,
 	}
 }
 
@@ -39,7 +45,9 @@ func (h *AuthHandler) ShowLogin(c *fiber.Ctx) error {
 			return c.Redirect("/inbox")
 		}
 	}
-	return c.Render("login", fiber.Map{})
+	return c.Render("login", fiber.Map{
+		"CSRFToken": c.Locals("csrf"),
+	})
 }
 
 // HandleLogin processes the login form
@@ -56,6 +64,7 @@ func (h *AuthHandler) HandleLogin(c *fiber.Ctx) error {
 		return c.Status(400).Render("login", fiber.Map{
 			"Error": "Email and password are required",
 			"Email": email,
+			"CSRFToken": c.Locals("csrf"),
 		})
 	}
 	var username string
@@ -70,6 +79,7 @@ func (h *AuthHandler) HandleLogin(c *fiber.Ctx) error {
 		return c.Status(400).Render("login", fiber.Map{
 			"Error": "Invalid email format",
 			"Email": email,
+			"CSRFToken": c.Locals("csrf"),
 		})
 	}
 
@@ -83,6 +93,7 @@ func (h *AuthHandler) HandleLogin(c *fiber.Ctx) error {
 		return c.Status(401).Render("login", fiber.Map{
 			"Error": "Invalid credentials or server error",
 			"Email": email,
+			"CSRFToken": c.Locals("csrf"),
 		})
 	}
 	defer client.Close()
@@ -92,6 +103,7 @@ func (h *AuthHandler) HandleLogin(c *fiber.Ctx) error {
 		return c.Status(500).Render("login", fiber.Map{
 			"Error": "Server error occurred during setup",
 			"Email": email,
+			"CSRFToken": c.Locals("csrf"),
 		})
 	}
 
@@ -100,6 +112,7 @@ func (h *AuthHandler) HandleLogin(c *fiber.Ctx) error {
 		return c.Status(500).Render("login", fiber.Map{
 			"Error": "Failed to create authentication token",
 			"Email": email,
+			"CSRFToken": c.Locals("csrf"),
 		})
 	}
 
@@ -108,20 +121,102 @@ func (h *AuthHandler) HandleLogin(c *fiber.Ctx) error {
 		return c.Status(500).Render("login", fiber.Map{
 			"Error": "Failed to secure credentials",
 			"Email": email,
+			"CSRFToken": c.Locals("csrf"),
 		})
 	}
+
+	// --- Multi-User & Account Logic Start ---
+	
+	// 1. Find or Create User
+	user, err := h.userStorage.GetUserByEmail(email)
+	if err != nil {
+		// Create new user if not found
+		newUser := &models.User{
+			Username:    username,
+			Email:       email,
+			DisplayName: username, // Default display name
+			Role:        "user",
+			Language:    "en", // Default, could be from config
+			Theme:       "light",
+		}
+		if err := h.userStorage.CreateUser(newUser, password); err != nil {
+			fmt.Printf("Failed to create user: %v\n", err)
+			// Non-fatal, proceed with session login
+		} else {
+			user = newUser
+		}
+	} else {
+		// Update last login
+		h.userStorage.UpdateLastLogin(user.ID)
+	}
+
+	// 2. Find or Create Account for this User
+	var currentAccount *models.Account
+	
+	if user != nil {
+		accounts, err := h.accountStorage.GetAccountsByUser(user.ID, []byte(h.config.Encryption.Key))
+		if err == nil {
+			for _, acc := range accounts {
+				if acc.Email == email {
+					currentAccount = acc
+					break
+				}
+			}
+		}
+
+		if currentAccount == nil {
+			// Create new account entry
+			newAccount := &models.Account{
+				UserID:      user.ID,
+				Email:       email,
+				IMAPServer:  h.config.IMAP.Server,
+				IMAPPort:    h.config.IMAP.Port,
+				IMAPSSL:     true, // Assuming SSL for now, should come from config
+				SMTPServer:  h.config.SMTP.Server,
+				SMTPPort:    h.config.SMTP.GetPort(),
+				SMTPSSL:     h.config.SMTP.UseSTARTTLS, // Using StartTLS setting as proxy
+				Username:    username,
+				Password:    password, // Will be encrypted by storage
+				DisplayName: username,
+				IsDefault:   len(accounts) == 0,
+			}
+			
+			if err := h.accountStorage.CreateAccount(newAccount, []byte(h.config.Encryption.Key)); err != nil {
+				fmt.Printf("Failed to create account: %v\n", err)
+			} else {
+				currentAccount = newAccount
+			}
+		} else {
+			// Update password if changed (detected by successful IMAP login with new password)
+			// Since we can't easily decrypt and compare without overhead, just update it if we are logging in successfully
+			currentAccount.Password = password
+			h.accountStorage.UpdateAccount(currentAccount, []byte(h.config.Encryption.Key))
+		}
+	}
+
+	// --- Multi-User & Account Logic End ---
 
 	sess.Set("authenticated", true)
 	sess.Set("email", email)
 	sess.Set("username", username)
 	sess.Set("token", token)
 	sess.Set("credentials", encryptedCreds)
+	
+	// Set UserID and AccountID in session for multi-user/account features
+	if user != nil {
+		sess.Set("userId", user.ID)
+	}
+	if currentAccount != nil {
+		sess.Set("accountId", currentAccount.ID)
+	}
+	
 	sess.SetExpiry(24 * 60 * 60 * time.Second)
 
 	if err := sess.Save(); err != nil {
 		return c.Status(500).Render("login", fiber.Map{
 			"Error": "Failed to create session",
 			"Email": email,
+			"CSRFToken": c.Locals("csrf"),
 		})
 	}
 

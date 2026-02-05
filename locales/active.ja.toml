@@ -155,6 +155,9 @@ other = "終了日"
 [search_no_results]
 other = "検索結果がありません"
 
+[search_scope]
+other = "検索範囲"
+
 # フォルダー管理
 [folder_create]
 other = "新規フォルダー作成"
@@ -267,3 +270,66 @@ other = "スレッドを展開"
 
 [thread_collapse]
 other = "スレッドを折りたたむ"
+
+# 表示モード
+[view_mode_flat]
+other = "フラット表示"
+
+[view_mode_threaded]
+other = "スレッド表示"
+
+# メール画面
+[email_select_message]
+other = "メールを選択して内容を表示"
+
+[email_title]
+other = "メール"
+
+# エディターモード
+[editor_mode_html]
+other = "HTML"
+
+[editor_mode_plain]
+other = "テキスト"
+
+# メール作成
+[compose_title]
+other = "新規メール作成"
+
+[compose_sending]
+other = "送信中..."
+
+# ページネーション
+[button_previous]
+other = "前へ"
+
+[button_next]
+other = "次へ"
+
+[page_of]
+other = "{{.Current}} / {{.Total}} ページ"
+
+# その他
+[inbox_label]
+other = "受信箱"
+
+[sent_label]
+other = "送信済み"
+
+[drafts_label]
+other = "下書き"
+
+[trash_label]
+other = "ゴミ箱"
+
+[folder_empty]
+other = "このフォルダーは空です"
+
+[button_more]
+other = "その他"
+
+[button_labels]
+other = "ラベル"
+
+[error_delete_failed]
+other = "削除に失敗しました"

@@ -135,12 +135,13 @@ func (tb *ThreadBuilder) groupThreads() []*models.EmailThread {
 		}
 		
 		// Check for unread messages
+		unreadCount := 0
 		for _, msg := range thread.Messages {
 			if !hasFlag(msg.Flags, "\\Seen") {
-				thread.Unread = true
-				break
+				unreadCount++
 			}
 		}
+		thread.Unread = unreadCount
 		
 		// Check for attachments
 		for _, msg := range thread.Messages {

@@ -1,0 +1,221 @@
+<!-- Thread View Partial Template -->
+<div class="thread-list">
+    {{if .Threads}}
+    {{range .Threads}}
+    <div class="thread-container" data-thread-id="{{.ID}}">
+        <!-- Thread Header -->
+        <div class="thread-header" onclick="toggleThread('{{.ID}}')">
+            <div class="thread-info">
+                <div class="thread-subject">
+                    {{if gt .Unread 0}}
+                    <span class="unread-badge">{{.Unread}}</span>
+                    {{end}}
+                    <span class="subject-text">{{.Subject}}</span>
+                    {{if .HasAttachment}}
+                    <span class="attachment-icon">📎</span>
+                    {{end}}
+                </div>
+                <div class="thread-meta">
+                    <span class="thread-participants">{{join .Participants ", "}}</span>
+                    <span class="thread-count">{{.MessageCount}} {{t "thread_messages"}}</span>
+                    <span class="thread-date">{{formatDate .LastDate}}</span>
+                </div>
+            </div>
+            <div class="thread-toggle">
+                <span class="toggle-icon">▼</span>
+            </div>
+        </div>
+
+        <!-- Thread Messages (Collapsed by default) -->
+        <div class="thread-messages" id="thread-messages-{{.ID}}" style="display: none;">
+            {{range .Messages}}
+            <div class="thread-message {{if not (hasPrefix .Flags " \\Seen")}}unread{{end}}"
+                hx-get="/api/email/{{.ID}}?folder={{$.CurrentFolder}}" hx-target="#email-viewer"
+                hx-headers='{"X-Folder": "{{$.CurrentFolder}}"}'>
+                <div class="message-header">
+                    <div class="message-from">
+                        <strong>{{.FromName}}</strong>
+                        <span class="message-email">&lt;{{.From}}&gt;</span>
+                    </div>
+                    <div class="message-date">{{formatDate .Date}}</div>
+                </div>
+                <div class="message-preview">{{.Preview}}</div>
+            </div>
+            {{end}}
+        </div>
+    </div>
+    {{end}}
+    {{else}}
+    <div class="no-threads">
+        <p>{{t "email_no_messages"}}</p>
+    </div>
+    {{end}}
+</div>
+
+<style>
+    /* Thread View Styles */
+    .thread-container {
+        margin-bottom: 0.75rem;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background-color: var(--bg-secondary);
+        overflow: hidden;
+        transition: all var(--transition-fast);
+    }
+
+    .thread-container:hover {
+        box-shadow: 0 2px 8px var(--shadow-hover);
+    }
+
+    .thread-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .thread-header:hover {
+        background-color: var(--email-hover-bg);
+    }
+
+    .thread-info {
+        flex: 1;
+    }
+
+    .thread-subject {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .subject-text {
+        font-weight: 600;
+        font-size: 1rem;
+        color: var(--text-primary);
+    }
+
+    .unread-badge {
+        background-color: var(--accent-primary);
+        color: white;
+        padding: 0.125rem 0.5rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    .attachment-icon {
+        font-size: 1rem;
+    }
+
+    .thread-meta {
+        display: flex;
+        gap: 1rem;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        flex-wrap: wrap;
+    }
+
+    .thread-participants {
+        color: var(--text-secondary);
+    }
+
+    .thread-count {
+        color: var(--accent-primary);
+        font-weight: 500;
+    }
+
+    .thread-toggle {
+        padding: 0 0.5rem;
+    }
+
+    .toggle-icon {
+        display: inline-block;
+        transition: transform var(--transition-fast);
+        color: var(--text-secondary);
+    }
+
+    .thread-header.expanded .toggle-icon {
+        transform: rotate(180deg);
+    }
+
+    .thread-messages {
+        border-top: 1px solid var(--border-color);
+        background-color: var(--bg-primary);
+    }
+
+    .thread-message {
+        padding: 0.75rem 1rem;
+        border-left: 3px solid transparent;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+    }
+
+    .thread-message:not(:last-child) {
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .thread-message:hover {
+        background-color: var(--email-hover-bg);
+        border-left-color: var(--accent-primary);
+    }
+
+    .thread-message.unread {
+        background-color: var(--email-unread-bg);
+        font-weight: 600;
+    }
+
+    .message-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.25rem;
+    }
+
+    .message-from {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .message-email {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+    }
+
+    .message-date {
+        font-size: 0.8rem;
+        color: var(--text-tertiary);
+    }
+
+    .message-preview {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .no-threads {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: var(--text-secondary);
+    }
+</style>
+
+<script>
+    function toggleThread(threadId) {
+        const messagesDiv = document.getElementById('thread-messages-' + threadId);
+        const header = messagesDiv.previousElementSibling;
+
+        if (messagesDiv.style.display === 'none') {
+            messagesDiv.style.display = 'block';
+            header.classList.add('expanded');
+        } else {
+            messagesDiv.style.display = 'none';
+            header.classList.remove('expanded');
+        }
+    }
+</script>

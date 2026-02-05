@@ -1,35 +1,113 @@
 <!-- templates/partials/email-list.html -->
 <div class="divide-y divide-gray-200">
+    {{if .Threads}}
+    {{template "partials/thread-view" .}}
+    {{else}}
     {{if .Emails}}
-        {{range .Emails}}
-        <div class="hover:bg-gray-50 cursor-pointer transition-colors"
-             hx-get="/api/email/{{.ID}}"
-             hx-target="#email-viewer-content, #email-viewer-content-mobile"
-             hx-headers='{"Authorization": "Bearer {{$.Token}}", "X-Folder": "{{$.CurrentFolder}}"}'
-             @click="showEmailViewer = true"
-             hx-swap="innerHTML">
-            <div class="px-4 py-3">
-                <div class="flex justify-between items-start">
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-center space-x-2 mb-1">
-                            <span class="font-medium text-gray-900 truncate">{{.From}}</span>
-                            <span class="text-sm text-gray-500">{{formatDate .Date}}</span>
+    {{range .Emails}}
+    <div class="hover:bg-gray-50 cursor-pointer transition-colors" hx-get="/api/email/{{.ID}}"
+        hx-target="#email-viewer-content, #email-viewer-content-mobile"
+        hx-headers='{"Authorization": "Bearer {{$.Token}}", "X-Folder": "{{$.CurrentFolder}}"}'
+        @click="showEmailViewer = true" hx-swap="innerHTML">
+        <div class="px-4 py-3">
+            <div class="flex justify-between items-start">
+                <div class="min-w-0 flex-1">
+                    <div class="flex items-center space-x-2 mb-1">
+                        <span class="font-medium text-gray-900 truncate">{{.From}}</span>
+                        <span class="text-sm text-gray-500">{{formatDate .Date}}</span>
+                        <!-- Labels Display -->
+                        {{if .Labels}}
+                        <div class="flex space-x-1 ml-2">
+                            {{range .Labels}}
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
+                                style="background-color: {{.Color}}20; color: {{.Color}}">
+                                {{.Name}}
+                            </span>
+                            {{end}}
                         </div>
-                        <h3 class="text-sm font-semibold text-gray-900 mb-0.5">{{.Subject}}</h3>
-                        <p class="text-sm text-gray-500 line-clamp-2">{{.Preview}}</p>
+                        {{end}}
                     </div>
+                    <h3 class="text-sm font-semibold text-gray-900 mb-0.5">{{.Subject}}</h3>
+                    <p class="text-sm text-gray-500 line-clamp-2">{{.Preview}}</p>
                 </div>
             </div>
         </div>
-        {{end}}
-    {{else}}
-        <div class="flex flex-col items-center justify-center h-96">
-            <svg class="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            <h3 class="mt-4 text-lg font-medium text-gray-900">No messages</h3>
-            <p class="mt-1 text-sm text-gray-500">This folder is empty.</p>
+    </div>
+    {{end}}
+
+    <!-- Pagination Controls -->
+    {{if .Pagination}}
+    <div class="px-4 py-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between sm:px-6">
+        <div class="flex-1 flex justify-between sm:hidden">
+            {{if .Pagination.HasPrev}}
+            <button hx-get="/htmx/folder/{{.CurrentFolder}}/emails?page={{.Pagination.Page | add -1}}"
+                hx-target="#email-list"
+                class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                Previous
+            </button>
+            {{end}}
+            {{if .Pagination.HasNext}}
+            <button hx-get="/htmx/folder/{{.CurrentFolder}}/emails?page={{.Pagination.Page | add 1}}"
+                hx-target="#email-list"
+                class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                Next
+            </button>
+            {{end}}
         </div>
+        <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+            <div>
+                <p class="text-sm text-gray-700">
+                    Showing page <span class="font-medium">{{.Pagination.Page}}</span> of <span
+                        class="font-medium">{{.Pagination.TotalPages}}</span>
+                    (<span class="font-medium">{{.Pagination.TotalEmails}}</span> total)
+                </p>
+            </div>
+            <div>
+                <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                    {{if .Pagination.HasPrev}}
+                    <button hx-get="/htmx/folder/{{.CurrentFolder}}/emails?page={{.Pagination.Page | add -1}}"
+                        hx-target="#email-list"
+                        class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                        <span class="sr-only">Previous</span>
+                        <!-- Heroicon name: solid/chevron-left -->
+                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                            aria-hidden="true">
+                            <path fill-rule="evenodd"
+                                d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    {{end}}
+
+                    {{if .Pagination.HasNext}}
+                    <button hx-get="/htmx/folder/{{.CurrentFolder}}/emails?page={{.Pagination.Page | add 1}}"
+                        hx-target="#email-list"
+                        class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                        <span class="sr-only">Next</span>
+                        <!-- Heroicon name: solid/chevron-right -->
+                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                            aria-hidden="true">
+                            <path fill-rule="evenodd"
+                                d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    {{end}}
+                </nav>
+            </div>
+        </div>
+    </div>
+    {{end}}
+
+    {{else}}
+    <div class="flex flex-col items-center justify-center h-96">
+        <svg class="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <h3 class="mt-4 text-lg font-medium text-gray-900">No messages</h3>
+        <p class="mt-1 text-sm text-gray-500">This folder is empty.</p>
+    </div>
+    {{end}}
     {{end}}
 </div>

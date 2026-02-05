@@ -1,150 +1,334 @@
 {{ define "compose-modal" }}
-<div 
-    x-show="showComposeModal" 
-    x-cloak
-    x-data="{ 
+<div x-show="showComposeModal" x-cloak x-data="{ 
         loading: false,
+        editorMode: 'rich',
+        quillEditor: null,
+        attachments: [],
+        
+        init() {
+            window.addEventListener('open-compose-with-data', (e) => {
+                this.resetForm();
+                const data = e.detail;
+                if (data.to) document.getElementById('to').value = data.to;
+                if (data.subject) document.getElementById('subject').value = data.subject;
+                
+                // Handle Body
+                if (data.body) {
+                    if (this.quillEditor) {
+                        this.quillEditor.root.innerHTML = data.body;
+                    }
+                    document.getElementById('body-plain').value = data.body; // Fallback
+                    // Determine mode based on content? Default to rich for replies
+                    this.editorMode = 'rich'; 
+                }
+                
+                this.showComposeModal = true;
+                this.$nextTick(() => this.initQuill());
+            });
+        },
+
         resetForm() {
             const form = document.getElementById('compose-form');
             if (form) {
                 form.reset();
-                loading = false;
+                if (this.quillEditor) {
+                    this.quillEditor.setContents([]);
+                }
+                this.attachments = [];
+                // Clear file input manually
+                const fileInput = document.getElementById('file-upload');
+                if (fileInput) fileInput.value = '';
+                
+                this.loading = false;
             }
+        },
+        
+        initQuill() {
+            if (!this.quillEditor && document.getElementById('quill-editor')) {
+                this.quillEditor = new Quill('#quill-editor', {
+                    theme: 'snow',
+                    placeholder: 'メッセージを入力してください...',
+                    modules: {
+                        toolbar: [
+                            [{ 'header': [1, 2, 3, false] }],
+                            ['bold', 'italic', 'underline', 'strike'],
+                            [{ 'color': [] }, { 'background': [] }],
+                            [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                            ['blockquote', 'code-block'],
+                            [{ 'align': [] }],
+                            ['link', 'image'],
+                            ['clean']
+                        ]
+                    }
+                });
+                
+                // Sync content to hidden input for FormData
+                 this.quillEditor.on('text-change', () => {
+                    document.getElementById('body-html').value = this.quillEditor.root.innerHTML;
+                });
+            }
+        },
+        
+        toggleEditorMode(mode) {
+            this.editorMode = mode;
+            if (mode === 'rich') {
+                this.$nextTick(() => this.initQuill());
+            }
+        },
+        
+        getEmailBody() {
+            if (this.editorMode === 'rich' && this.quillEditor) {
+                return this.quillEditor.root.innerHTML;
+            }
+            return document.getElementById('body-plain').value;
+        },
+        
+        handleFiles(e) {
+            const files = e.target.files;
+            for (let i = 0; i < files.length; i++) {
+                this.attachments.push(files[i]);
+            }
+        },
+        
+        removeAttachment(index) {
+            this.attachments.splice(index, 1);
+            // Re-sync file input is hard, so we just manage the array
+            // The actual submission will need to construct FormData manually
+        },
+
+        async sendEmail() {
+            this.loading = true;
+            const body = this.getEmailBody();
+            const to = document.getElementById('to').value;
+            const subject = document.getElementById('subject').value;
+            
+            const formData = new FormData();
+            formData.append('to', to);
+            formData.append('subject', subject);
+            formData.append('body', body);
+            formData.append('is_html', this.editorMode === 'rich');
+            
+            // Append attachments
+            for (let i = 0; i < this.attachments.length; i++) {
+                formData.append('attachments', this.attachments[i]);
+            }
+
+            try {
+                const response = await fetch('/api/compose', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('token')
+                        // Content-Type is set automatically for FormData
+                    },
+                    body: formData
+                });
+                
+                const result = await response.json();
+                this.loading = false;
+                
+                if (result.success) {
+                    this.$dispatch('show-toast', { type: 'success', title: 'Email Sent', message: 'sent!' });
+                    this.showComposeModal = false;
+                    this.resetForm();
+                } else {
+                    this.$dispatch('show-toast', { type: 'error', title: 'Error', message: result.error || 'Failed to send email' });
+                }
+            } catch (err) {
+                 this.loading = false;
+                 this.$dispatch('show-toast', { type: 'error', title: 'Error', message: 'Network error' });
+                 console.error(err);
+            }
+        },
+        
+        saveDraft() {
+            this.loading = true;
+            const body = this.getEmailBody();
+            const to = document.getElementById('to').value;
+            const subject = document.getElementById('subject').value;
+            
+            if (!to && !subject && !body) {
+                this.$dispatch('show-toast', { type: 'error', title: 'Error', message: 'Cannot save empty draft' });
+                this.loading = false;
+                return;
+            }
+
+            const data = {
+                to: to,
+                subject: subject,
+                body: body,
+                is_html: this.editorMode === 'rich'
+            };
+            
+            fetch('/api/drafts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + localStorage.getItem('token')
+                },
+                body: JSON.stringify(data)
+            })
+            .then(res => res.json())
+            .then(data => {
+                this.loading = false;
+                if (data.success) {
+                    this.$dispatch('show-toast', { type: 'success', title: 'Draft Saved', message: 'Draft saved successfully' });
+                    this.showComposeModal = false;
+                    this.resetForm();
+                } else {
+                    this.$dispatch('show-toast', { type: 'error', title: 'Error', message: data.error || 'Failed to save draft' });
+                }
+            })
+            .catch(err => {
+                this.loading = false;
+                this.$dispatch('show-toast', { type: 'error', title: 'Error', message: 'Network error' });
+            });
         }
-    }"
-    @compose-modal-opened.window="resetForm()"
-    x-init="$watch('showComposeModal', value => { if (!value) { resetForm() } })"
-    class="fixed inset-0 z-50 overflow-y-auto"
-    role="dialog"
-    aria-modal="true"
->
+    }" @compose-modal-opened.window="resetForm(); $nextTick(() => initQuill())" x-init="$watch('showComposeModal', value => { 
+        if (!value) { 
+            resetForm() 
+        } else {
+            $nextTick(() => initQuill())
+        }
+    }); init()" class="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
     <div class="min-h-screen px-4 text-center flex items-center justify-center">
-        <div 
-            class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" 
-            @click="showComposeModal = false"
-            aria-hidden="true"
-        ></div>
+        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="showComposeModal = false"
+            aria-hidden="true"></div>
 
         <div class="relative inline-block w-full max-w-2xl text-left transform transition-all">
             <div class="bg-white rounded-lg shadow-xl">
                 <!-- Header -->
                 <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                    <h3 class="text-lg font-medium text-gray-900">Compose New Message</h3>
-                    <button 
-                        @click="showComposeModal = false"
-                        class="text-gray-400 hover:text-gray-500">
+                    <h3 class="text-lg font-medium text-gray-900">{{t "compose_title"}}</h3>
+                    <button @click="showComposeModal = false" class="text-gray-400 hover:text-gray-500">
                         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12" />
                         </svg>
                     </button>
                 </div>
 
-                <form 
-                    id="compose-form"
-                    hx-post="/api/compose"
-                    hx-swap="none"
-                    hx-headers='js:{"Authorization": "Bearer " + localStorage.getItem("token")}'
-                    @htmx:before-request="loading = true"
-                    @htmx:after-request="loading = false"
-                    @htmx:response="(() => {
-                        const resp = JSON.parse(event.detail.xhr.response);
-                        if (resp.success) {
-                            $dispatch('show-toast', { 
-                                type: 'success',
-                                title: 'Email Sent',
-                                message: 'sent!'
-                            });
-                            
-                            $nextTick(() => {
-                                resetForm();
-                                showComposeModal = false;
-                            });
-                        } else {
-                            $dispatch('show-toast', { 
-                                type: 'error',
-                                title: 'Error',
-                                message: resp.message || 'Failed to send email'
-                            });
-                        }
-                    })()"
-                    class="px-6 py-4 space-y-4"
-                >
+                <form id="compose-form" @submit.prevent="sendEmail" class="px-6 py-4 space-y-4">
                     <!-- To Field -->
                     <div class="space-y-1">
-                        <label for="to" class="block text-sm font-medium text-gray-700">To</label>
+                        <label for="to" class="block text-sm font-medium text-gray-700">{{t "compose_to"}}</label>
                         <div class="mt-1">
-                            <input 
-                                type="email" 
-                                name="to" 
-                                id="to" 
-                                required
-                                placeholder="recipient@example.com"
+                            <input type="email" name="to" id="to" required placeholder="recipient@example.com"
                                 :disabled="loading"
-                                class="h-12 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base disabled:bg-gray-50"
-                            >
+                                class="h-12 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base disabled:bg-gray-50">
                         </div>
                     </div>
 
                     <!-- Subject Field -->
                     <div class="space-y-1">
-                        <label for="subject" class="block text-sm font-medium text-gray-700">Subject</label>
+                        <label for="subject" class="block text-sm font-medium text-gray-700">{{t
+                            "compose_subject"}}</label>
                         <div class="mt-1">
-                            <input 
-                                type="text" 
-                                name="subject" 
-                                id="subject" 
-                                required
-                                placeholder="Message subject"
+                            <input type="text" name="subject" id="subject" required placeholder="Message subject"
                                 :disabled="loading"
-                                class="h-12 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base disabled:bg-gray-50"
-                            >
+                                class="h-12 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base disabled:bg-gray-50">
                         </div>
                     </div>
 
-                    <!-- Message Field -->
+                    <!-- Attachments Field -->
                     <div class="space-y-1">
-                        <label for="body" class="block text-sm font-medium text-gray-700">Message</label>
-                        <div class="mt-1">
-                            <textarea 
-                                name="body" 
-                                id="body" 
-                                rows="12" 
-                                required
-                                placeholder="Type your message here..."
-                                :disabled="loading"
-                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base disabled:bg-gray-50"
-                            ></textarea>
+                        <label class="block text-sm font-medium text-gray-700">Attachments</label>
+                        <div class="mt-1 flex items-center space-x-2">
+                            <label
+                                class="cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+                                <svg class="h-5 w-5 mr-2 text-gray-400" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                                Add Files
+                                <input type="file" id="file-upload" class="hidden" multiple @change="handleFiles">
+                            </label>
                         </div>
+
+                        <!-- File List -->
+                        <div class="mt-2 space-y-2" x-show="attachments.length > 0">
+                            <template x-for="(file, index) in attachments" :key="index">
+                                <div
+                                    class="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
+                                    <div class="flex items-center">
+                                        <svg class="h-4 w-4 text-gray-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd"
+                                                d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"
+                                                clip-rule="evenodd" />
+                                        </svg>
+                                        <span class="text-sm text-gray-600" x-text="file.name"></span>
+                                        <span class="text-xs text-gray-400 ml-2"
+                                            x-text="(file.size / 1024).toFixed(1) + ' KB'"></span>
+                                    </div>
+                                    <button type="button" @click="removeAttachment(index)"
+                                        class="text-red-500 hover:text-red-700">
+                                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Editor Mode Toggle -->
+                    <div class="space-y-1">
+                        <label class="block text-sm font-medium text-gray-700">{{t "compose_body"}}</label>
+                        <div class="flex space-x-2 mb-2">
+                            <button type="button" @click="toggleEditorMode('rich')"
+                                :class="editorMode === 'rich' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'"
+                                class="px-3 py-1 rounded text-sm font-medium transition-colors">
+                                {{t "editor_mode_html"}}
+                            </button>
+                            <button type="button" @click="toggleEditorMode('plain')"
+                                :class="editorMode === 'plain' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'"
+                                class="px-3 py-1 rounded text-sm font-medium transition-colors">
+                                {{t "editor_mode_plain"}}
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Rich Text Editor (Quill) -->
+                    <div class="space-y-1" x-show="editorMode === 'rich'">
+                        <div id="quill-editor" style="height: 300px;"
+                            class="bg-white rounded-md border border-gray-300"></div>
+                        <input type="hidden" name="body" id="body-html">
+                    </div>
+
+                    <!-- Plain Text Editor -->
+                    <div class="space-y-1" x-show="editorMode === 'plain'" x-cloak>
+                        <textarea name="body" id="body-plain" rows="12" placeholder="メッセージを入力してください..."
+                            :disabled="loading"
+                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base disabled:bg-gray-50"></textarea>
                     </div>
 
                     <!-- Loading Indicator -->
-                    <div 
-                        x-show="loading"
-                        class="flex items-center justify-center py-2"
-                    >
-                        <svg class="animate-spin h-5 w-5 text-blue-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    <div x-show="loading" class="flex items-center justify-center py-2">
+                        <svg class="animate-spin h-5 w-5 text-blue-500 mr-2" xmlns="http://www.w3.org/2000/svg"
+                            fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                            </path>
                         </svg>
-                        <span class="text-sm text-gray-500">Sending...</span>
+                        <span class="text-sm text-gray-500">{{t "compose_sending"}}</span>
                     </div>
 
                     <!-- Action Buttons -->
                     <div class="mt-6 flex justify-end space-x-3">
-                        <button 
-                            type="button"
-                            @click="showComposeModal = false"
-                            :disabled="loading"
-                            class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                            Cancel
+                        <button type="button" @click="saveDraft()" :disabled="loading"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50">
+                            {{t "compose_save_draft"}}
                         </button>
-                        <button 
-                            type="submit"
-                            :disabled="loading"
-                            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                            <span x-text="loading ? 'Sending...' : 'Send'"></span>
+                        <button type="button" @click="showComposeModal = false" :disabled="loading"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50">
+                            {{t "settings_cancel"}}
+                        </button>
+                        <button type="submit" :disabled="loading"
+                            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50">
+                            <span x-text="loading ? '{{t " compose_sending"}}' : '{{t "compose_send"}}'"></span>
                         </button>
                     </div>
                 </form>

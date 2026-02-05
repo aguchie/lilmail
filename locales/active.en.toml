@@ -267,3 +267,66 @@ other = "Expand thread"
 
 [thread_collapse]
 other = "Collapse thread"
+
+# View modes
+[view_mode_flat]
+other = "Flat View"
+
+[view_mode_threaded]
+other = "Threaded View"
+
+# Email screen
+[email_select_message]
+other = "Select an email to view its contents"
+
+[email_title]
+other = "Email"
+
+# Editor modes
+[editor_mode_html]
+other = "HTML"
+
+[editor_mode_plain]
+other = "Plain Text"
+
+# Compose
+[compose_title]
+other = "Compose New Message"
+
+[compose_sending]
+other = "Sending..."
+
+# Pagination
+[button_previous]
+other = "Previous"
+
+[button_next]
+other = "Next"
+
+[page_of]
+other = "Page {{.Current}} of {{.Total}}"
+
+# Other
+[inbox_label]
+other = "Inbox"
+
+[sent_label]
+other = "Sent"
+
+[drafts_label]
+other = "Drafts"
+
+[trash_label]
+other = "Trash"
+
+[folder_empty]
+other = "This folder is empty"
+
+[button_more]
+other = "More"
+
+[button_labels]
+other = "Labels"
+
+[error_delete_failed]
+other = "Failed to delete"

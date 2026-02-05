@@ -2,70 +2,75 @@ package middleware
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
+	"sync"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-// CSRFConfig holds CSRF protection configuration
-type CSRFConfig struct {
-	TokenLength  int
-	CookieName   string
-	HeaderName   string
-	ContextKey   string
-	CookieMaxAge int
-	Skipper      func(*fiber.Ctx) bool
+// CSRFToken represents a CSRF token with its expiration
+type CSRFToken struct {
+	Token     string
+	ExpiresAt time.Time
 }
 
-// DefaultCSRFConfig returns default CSRF configuration
-func DefaultCSRFConfig() CSRFConfig {
-	return CSRFConfig{
-		TokenLength:  32,
-		CookieName:   "csrf_token",
-		HeaderName:   "X-CSRF-Token",
-		ContextKey:   "csrf",
-		CookieMaxAge: 3600, // 1 hour
-		Skipper:      nil,
-	}
-}
+var (
+	csrfTokens = make(map[string]*CSRFToken)
+	csrfMutex  sync.RWMutex
+)
 
-// CSRFProtection creates CSRF protection middleware
-func CSRFProtection(config ...CSRFConfig) fiber.Handler {
-	cfg := DefaultCSRFConfig()
-	if len(config) > 0 {
-		cfg = config[0]
-	}
+// CSRFProtection creates a CSRF protection middleware
+func CSRFProtection() fiber.Handler {
+	// Cleanup expired tokens every 10 minutes
+	go func() {
+		for {
+			time.Sleep(10 * time.Minute)
+			csrfMutex.Lock()
+			for sessionID, token := range csrfTokens {
+				if time.Now().After(token.ExpiresAt) {
+					delete(csrfTokens, sessionID)
+				}
+			}
+			csrfMutex.Unlock()
+		}
+	}()
 
 	return func(c *fiber.Ctx) error {
-		// Skip if skipper function returns true
-		if cfg.Skipper != nil && cfg.Skipper(c) {
+		// Skip CSRF check for GET, HEAD, OPTIONS
+		if c.Method() == "GET" || c.Method() == "HEAD" || c.Method() == "OPTIONS" {
 			return c.Next()
 		}
 
-		// Skip GET, HEAD, OPTIONS requests
-		if c.Method() == fiber.MethodGet ||
-			c.Method() == fiber.MethodHead ||
-			c.Method() == fiber.MethodOptions {
-			return c.Next()
-		}
-
-		// Get token from cookie
-		cookieToken := c.Cookies(cfg.CookieName)
-
-		// Get token from header
-		headerToken := c.Get(cfg.HeaderName)
-
-		// Validate token
-		if cookieToken == "" || headerToken == "" {
+		// Get session ID from cookies
+		sessionID := c.Cookies("session_id")
+		if sessionID == "" {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error": "CSRF token missing",
+				"error": "CSRF token validation failed: no session",
 			})
 		}
 
-		if !tokensEqual(cookieToken, headerToken) {
+		// Get CSRF token from header
+		csrfToken := c.Get("X-CSRF-Token")
+		if csrfToken == "" {
+			// Try to get from form data
+			csrfToken = c.FormValue("csrf_token")
+		}
+
+		if csrfToken == "" {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error": "CSRF token mismatch",
+				"error": "CSRF token validation failed: token not found",
+			})
+		}
+
+		// Validate token
+		csrfMutex.RLock()
+		storedToken, exists := csrfTokens[sessionID]
+		csrfMutex.RUnlock()
+
+		if !exists || storedToken.Token != csrfToken || time.Now().After(storedToken.ExpiresAt) {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "CSRF token validation failed: invalid or expired token",
 			})
 		}
 
@@ -73,42 +78,33 @@ func CSRFProtection(config ...CSRFConfig) fiber.Handler {
 	}
 }
 
-// GenerateCSRFToken generates a new CSRF token and sets it in a cookie
-func GenerateCSRFToken(c *fiber.Ctx, config ...CSRFConfig) string {
-	cfg := DefaultCSRFConfig()
-	if len(config) > 0 {
-		cfg = config[0]
-	}
-
+// GenerateCSRFToken generates a new CSRF token for a session
+func GenerateCSRFToken(sessionID string) string {
 	// Generate random token
-	token := generateToken(cfg.TokenLength)
+	b := make([]byte, 32)
+	rand.Read(b)
+	token := base64.URLEncoding.EncodeToString(b)
 
-	// Set cookie
-	c.Cookie(&fiber.Cookie{
-		Name:     cfg.CookieName,
-		Value:    token,
-		MaxAge:   cfg.CookieMaxAge,
-		HTTPOnly: true,
-		SameSite: "Strict",
-		Secure:   false, // Set to true in production with HTTPS
-	})
-
-	// Store in context
-	c.Locals(cfg.ContextKey, token)
+	// Store token with expiration
+	csrfMutex.Lock()
+	csrfTokens[sessionID] = &CSRFToken{
+		Token:     token,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+	csrfMutex.Unlock()
 
 	return token
 }
 
-// generateToken generates a random token
-func generateToken(length int) string {
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	return base64.URLEncoding.EncodeToString(b)
-}
+// GetCSRFToken retrieves an existing CSRF token for a session or generates a new one
+func GetCSRFToken(sessionID string) string {
+	csrfMutex.RLock()
+	token, exists := csrfTokens[sessionID]
+	csrfMutex.RUnlock()
 
-// tokensEqual performs constant-time comparison of tokens
-func tokensEqual(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+	if exists && time.Now().Before(token.ExpiresAt) {
+		return token.Token
+	}
+
+	return GenerateCSRFToken(sessionID)
 }

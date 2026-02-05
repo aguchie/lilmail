@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="{{.Language}}">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{t "settings_title"}} - LilMail</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-md px-6 py-3">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <a href="/inbox" class="text-xl font-bold text-blue-600 hover:text-blue-700">
+                    LilMail
+                </a>
+                <span class="text-gray-600">/</span>
+                <span class="text-gray-600">{{t "settings_title"}}</span>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span class="text-gray-600">{{.Username}}</span>
+                <a href="/logout" class="text-red-500 hover:text-red-700">{{t "nav_logout"}}</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-8 max-w-4xl" x-data="{
+        loading: false,
+        language: '{{.User.Language}}',
+        theme: '{{.User.Theme}}',
+        pageSize: {{.User.PageSize}},
+        showAccountForm: false,
+        editingAccount: null
+    }">
+        <div class="bg-white shadow-sm rounded-lg overflow-hidden">
+            <!-- Settings Header -->
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h1 class="text-2xl font-bold text-gray-900">{{t "settings_title"}}</h1>
+            </div>
+
+            <div class="p-6 space-y-8">
+                <!-- General Settings Section -->
+                <section>
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">一般設定</h2>
+                    <form hx-post="/api/settings/general" hx-swap="none" @htmx:after-request="if($event.detail.successful) { 
+                              window.dispatchEvent(new CustomEvent('show-toast', { 
+                                  detail: { type: 'success', title: '保存しました', message: '設定を更新しました' }
+                              }));
+                          }" class="space-y-4">
+
+                        <!-- Language -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                {{t "settings_language"}}
+                            </label>
+                            <select name="language" x-model="language"
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                                <option value="en">English</option>
+                                <option value="ja">日本語</option>
+                            </select>
+                        </div>
+
+                        <!-- Theme -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                {{t "settings_theme"}}
+                            </label>
+                            <div class="flex space-x-4">
+                                <label class="flex items-center">
+                                    <input type="radio" name="theme" value="light" x-model="theme" class="mr-2">
+                                    <span>{{t "settings_theme_light"}}</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="theme" value="dark" x-model="theme" class="mr-2">
+                                    <span>{{t "settings_theme_dark"}}</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="theme" value="auto" x-model="theme" class="mr-2">
+                                    <span>{{t "settings_theme_auto"}}</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Page Size -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                {{t "settings_page_size"}}
+                            </label>
+                            <select name="pageSize" x-model="pageSize"
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+
+                        <!-- Save Button -->
+                        <div class="flex justify-end">
+                            <button type="submit" :disabled="loading"
+                                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50">
+                                {{t "settings_save"}}
+                            </button>
+                        </div>
+                    </form>
+                </section>
+
+                <!-- Account Management Section -->
+                <section>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900">アカウント管理</h2>
+                        <button @click="showAccountForm = true; editingAccount = null"
+                            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm">
+                            + 新規アカウント追加
+                        </button>
+                    </div>
+
+                    <!-- Accounts List -->
+                    <div class="space-y-3">
+                        {{range .Accounts}}
+                        <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="font-medium text-gray-900">{{.Email}}</div>
+                                    <div class="text-sm text-gray-500">{{.IMAPServer}}:{{.IMAPPort}}</div>
+                                    {{if .IsDefault}}
+                                    <span
+                                        class="inline-block mt-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">デフォルト</span>
+                                    {{end}}
+                                </div>
+                                <div class="flex space-x-2">
+                                    <button class="px-3 py-1 text-sm text-blue-600 hover:text-blue-800">編集</button>
+                                    {{if not .IsDefault}}
+                                    <button
+                                        class="px-3 py-1 text-sm text-gray-600 hover:text-gray-800">デフォルトに設定</button>
+                                    <button class="px-3 py-1 text-sm text-red-600 hover:text-red-800">削除</button>
+                                    {{end}}
+                                </div>
+                            </div>
+                        </div>
+                        {{else}}
+                        <div class="text-center py-8 text-gray-500">
+                            アカウントがありません
+                        </div>
+                        {{end}}
+                    </div>
+                </section>
+
+                <!-- Label Management Section -->
+                <section x-data="{
+                    showCreateLabel: false,
+                    newLabelName: '',
+                    newLabelColor: '#3b82f6',
+                    labels: [],
+                    
+                    init() {
+                        // Labels are passed from server, but we might want to refresh or manage localized array
+                        // For now we trust the server rendered list if possible, but Alpine needs it in JS 
+                        // We can initialize from a hidden JSON or just fetch. Fetch is safer for dynamic updates.
+                        this.fetchLabels();
+                    },
+
+                    fetchLabels() {
+                        fetch('/api/labels', {
+                            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                this.labels = data.labels;
+                            }
+                        });
+                    },
+
+                    createLabel() {
+                        if (!this.newLabelName) return;
+                        
+                        fetch('/api/labels', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer ' + localStorage.getItem('token')
+                            },
+                            body: JSON.stringify({
+                                name: this.newLabelName,
+                                color: this.newLabelColor
+                            })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                this.fetchLabels();
+                                this.newLabelName = '';
+                                this.showCreateLabel = false;
+                                window.dispatchEvent(new CustomEvent('show-toast', { 
+                                    detail: { type: 'success', title: '成功', message: 'ラベルを作成しました' }
+                                }));
+                            } else {
+                                window.dispatchEvent(new CustomEvent('show-toast', { 
+                                    detail: { type: 'error', title: 'エラー', message: data.error }
+                                }));
+                            }
+                        });
+                    },
+
+                    deleteLabel(id) {
+                        if (!confirm('このラベルを削除してもよろしいですか？')) return;
+
+                        fetch(`/api/labels/${id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                this.fetchLabels();
+                                window.dispatchEvent(new CustomEvent('show-toast', { 
+                                    detail: { type: 'success', title: '成功', message: 'ラベルを削除しました' }
+                                }));
+                            } else {
+                                window.dispatchEvent(new CustomEvent('show-toast', { 
+                                    detail: { type: 'error', title: 'エラー', message: data.error }
+                                }));
+                            }
+                        });
+                    }
+                }">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900">ラベル管理</h2>
+                        <button @click="showCreateLabel = true"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">
+                            + 新規ラベル追加
+                        </button>
+                    </div>
+
+                    <!-- Labels List -->
+                    <div class="border border-gray-200 rounded-lg overflow-hidden">
+                        <template x-for="label in labels" :key="label.id">
+                            <div
+                                class="flex items-center justify-between p-4 border-b border-gray-200 last:border-b-0 hover:bg-gray-50">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-4 h-4 rounded-full" :style="`background-color: ${label.color}`"></div>
+                                    <span class="font-medium text-gray-900" x-text="label.name"></span>
+                                </div>
+                                <button @click="deleteLabel(label.id)" class="text-red-500 hover:text-red-700 text-sm">
+                                    削除
+                                </button>
+                            </div>
+                        </template>
+                        <div x-show="labels.length === 0" class="p-8 text-center text-gray-500">
+                            ラベルがありません
+                        </div>
+                    </div>
+
+                    <!-- Create Label Modal -->
+                    <div x-show="showCreateLabel" x-cloak
+                        class="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75" @click="showCreateLabel = false"></div>
+                        <div class="bg-white rounded-lg shadow-xl max-w-sm w-full relative z-10 p-6">
+                            <h3 class="text-lg font-medium text-gray-900 mb-4">新規ラベル作成</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">ラベル名</label>
+                                    <input type="text" x-model="newLabelName"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                        @keydown.enter="createLabel">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">色</label>
+                                    <div class="flex flex-wrap gap-2">
+                                        <template
+                                            x-for="color in ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#6b7280']">
+                                            <button type="button"
+                                                class="w-8 h-8 rounded-full border-2 focus:outline-none"
+                                                :class="newLabelColor === color ? 'border-gray-900' : 'border-transparent'"
+                                                :style="`background-color: ${color}`" @click="newLabelColor = color">
+                                            </button>
+                                        </template>
+                                    </div>
+                                </div>
+                                <div class="flex justify-end space-x-3 mt-6">
+                                    <button @click="showCreateLabel = false"
+                                        class="px-3 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm">
+                                        キャンセル
+                                    </button>
+                                    <button @click="createLabel"
+                                        class="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">
+                                        作成
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Notification Settings Section -->
+                <section>
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">通知設定</h2>
+                    <form hx-post="/api/settings/notifications" hx-swap="none" class="space-y-4">
+
+                        <div class="flex items-center">
+                            <input type="checkbox" name="desktopNotifications" id="desktopNotifications" {{if
+                                .NotificationSettings.Desktop}}checked{{end}}
+                                class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="desktopNotifications" class="ml-2 block text-sm text-gray-700">
+                                デスクトップ通知を有効にする
+                            </label>
+                        </div>
+
+                        <div class="flex items-center">
+                            <input type="checkbox" name="newEmailNotifications" id="newEmailNotifications" {{if
+                                .NotificationSettings.NewEmail}}checked{{end}}
+                                class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="newEmailNotifications" class="ml-2 block text-sm text-gray-700">
+                                新着メール通知
+                            </label>
+                        </div>
+
+                        <div class="flex justify-end">
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                                {{t "settings_save"}}
+                            </button>
+                        </div>
+                    </form>
+                </section>
+            </div>
+        </div>
+
+        <!-- Account Form Modal -->
+        <div x-show="showAccountForm" x-cloak class="fixed inset-0 z-50 overflow-y-auto" role="dialog"
+            aria-modal="true">
+            <div class="min-h-screen px-4 text-center flex items-center justify-center">
+                <div class="fixed inset-0 bg-gray-500 bg-opacity-75" @click="showAccountForm = false"></div>
+
+                <div class="relative inline-block w-full max-w-md text-left bg-white rounded-lg shadow-xl">
+                    <div class="px-6 py-4 border-b">
+                        <h3 class="text-lg font-medium text-gray-900">
+                            <span x-text="editingAccount ? 'アカウント編集' : '新規アカウント追加'"></span>
+                        </h3>
+                    </div>
+
+                    <form hx-post="/api/accounts" hx-swap="none" class="px-6 py-4 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">メールアドレス</label>
+                            <input type="email" name="email" required
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">IMAPサーバー</label>
+                            <input type="text" name="imapServer" required
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">IMAPポート</label>
+                                <input type="number" name="imapPort" value="993" required
+                                    class="block w-full px-3 py-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div class="flex items-end">
+                                <label class="flex items-center">
+                                    <input type="checkbox" name="imapSSL" checked class="mr-2">
+                                    <span class="text-sm">SSL使用</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">SMTPサーバー</label>
+                            <input type="text" name="smtpServer" required
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">SMTPポート</label>
+                                <input type="number" name="smtpPort" value="587" required
+                                    class="block w-full px-3 py-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div class="flex items-end">
+                                <label class="flex items-center">
+                                    <input type="checkbox" name="smtpSSL" checked class="mr-2">
+                                    <span class="text-sm">SSL使用</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">ユーザー名</label>
+                            <input type="text" name="username" required
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">パスワード</label>
+                            <input type="password" name="password" required
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+
+                        <div class="flex justify-end space-x-3 pt-4">
+                            <button type="button" @click="showAccountForm = false"
+                                class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">
+                                {{t "settings_cancel"}}
+                            </button>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                                {{t "settings_save"}}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>

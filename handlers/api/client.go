@@ -117,3 +117,18 @@ func (c *Client) SaveToSent(to, subject, body string) error {
 	// Append the message to the Sent folder
 	return c.client.Append(selectedFolder, nil, time.Now(), strings.NewReader(message))
 }
+
+// CreateFolder creates a new IMAP folder
+func (c *Client) CreateFolder(folderName string) error {
+	return c.client.Create(folderName)
+}
+
+// DeleteFolder deletes an IMAP folder
+func (c *Client) DeleteFolder(folderName string) error {
+	return c.client.Delete(folderName)
+}
+
+// RenameFolder renames an IMAP folder
+func (c *Client) RenameFolder(oldName, newName string) error {
+	return c.client.Rename(oldName, newName)
+}

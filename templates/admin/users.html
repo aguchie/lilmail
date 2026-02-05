@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - LilMail</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-md px-6 py-3">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <a href="/inbox" class="text-xl font-bold text-blue-600 hover:text-blue-700">
+                    LilMail
+                </a>
+                <span class="text-gray-600">/</span>
+                <span class="text-gray-600">{{t "admin_users"}}</span>
+            </div>
+            <div class="flex items-center space-x-4">
+                <a href="/settings" class="text-blue-600 hover:text-blue-700">{{t "settings"}}</a>
+                <a href="/logout" class="text-red-500 hover:text-red-700">{{t "logout"}}</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-8">
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">{{t "user_management"}}</h1>
+                <button onclick="showAddUserModal()"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md">
+                    {{t "add_user"}}
+                </button>
+            </div>
+
+            <!-- Users Table -->
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {{t "username"}}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {{t "role"}}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {{t "accounts_count"}}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {{t "created_at"}}
+                            </th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {{t "actions"}}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="users-table">
+                        {{range .Users}}
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                {{.Username}}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                <span
+                                    class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {{if eq .Role "
+                                    admin"}}bg-purple-100 text-purple-800{{else}}bg-green-100 text-green-800{{end}}">
+                                    {{.Role}}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {{.AccountsCount}}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {{formatDate .CreatedAt}}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <button onclick="editUser('{{.Username}}')"
+                                    class="text-blue-600 hover:text-blue-900 mr-4">
+                                    {{t "edit"}}
+                                </button>
+                                {{if ne .Username "admin"}}
+                                <button onclick="deleteUser('{{.Username}}')" class="text-red-600 hover:text-red-900">
+                                    {{t "delete"}}
+                                </button>
+                                {{end}}
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr>
+                            <td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500">
+                                {{t "no_users_found"}}
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Add User Modal -->
+    <div id="add-user-modal"
+        class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h2 class="text-xl font-bold mb-4">{{t "add_new_user"}}</h2>
+            <form id="add-user-form" onsubmit="submitAddUser(event)">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">{{t "username"}}</label>
+                    <input type="text" name="username" required
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">{{t "password"}}</label>
+                    <input type="password" name="password" required
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">{{t "role"}}</label>
+                    <select name="role"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="user">{{t "role_user"}}</option>
+                        <option value="admin">{{t "role_admin"}}</option>
+                    </select>
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="hideAddUserModal()"
+                        class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">
+                        {{t "cancel"}}
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                        {{t "add_user"}}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function showAddUserModal() {
+            document.getElementById('add-user-modal').classList.remove('hidden');
+        }
+
+        function hideAddUserModal() {
+            document.getElementById('add-user-modal').classList.add('hidden');
+            document.getElementById('add-user-form').reset();
+        }
+
+        function submitAddUser(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+
+            fetch('/api/admin/users', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: formData.get('username'),
+                    password: formData.get('password'),
+                    role: formData.get('role')
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(window.i18n ? window.i18n.t('message_user_added', 'User added successfully') : 'User added successfully');
+                        window.location.reload();
+                    } else {
+                        alert(data.error || 'Failed to add user');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred');
+                });
+        }
+
+        function deleteUser(username) {
+            const msg = window.i18n ? window.i18n.t('confirm_delete_user', 'Are you sure you want to delete this user?') : 'Are you sure you want to delete this user?';
+            if (confirm(msg)) {
+                fetch(`/api/admin/users/${username}`, {
+                    method: 'DELETE'
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            window.location.reload();
+                        } else {
+                            alert(data.error || 'Failed to delete user');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred');
+                    });
+            }
+        }
+
+        function editUser(username) {
+            // Redirect to user edit page
+            window.location.href = `/admin/users/${username}/edit`;
+        }
+    </script>
+</body>
+
+</html>

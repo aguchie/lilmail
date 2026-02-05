@@ -1,4 +1,3 @@
-// handlers/api/email.go
 package api
 
 import (
@@ -8,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"lilmail/models"
+	"lilmail/utils"
 	"log"
 	"mime"
 	"mime/multipart"
@@ -41,6 +41,138 @@ func (c *Client) FetchMessages(folderName string, limit uint32) ([]models.Email,
 	seqSet.AddRange(from, mbox.Messages)
 
 	messages := make(chan *imap.Message, limit)
+	// Add header fetch for References
+	// Add header fetch for References
+	section := &imap.BodySectionName{
+		BodyPartName: imap.BodyPartName{
+			Specifier: imap.HeaderSpecifier,
+			Fields:    []string{"REFERENCES"},
+		},
+		Peek: true,
+	}
+
+	items := []imap.FetchItem{
+		imap.FetchEnvelope,
+		imap.FetchFlags,
+		imap.FetchBody,
+		imap.FetchBodyStructure,
+		imap.FetchUid,
+		section.FetchItem(),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.client.Fetch(seqSet, items, messages)
+	}()
+
+	var emails []models.Email
+	for msg := range messages {
+		email, err := c.processMessage(msg)
+		if err != nil {
+			fmt.Printf("Error processing message %d: %v\n", msg.Uid, err)
+			continue
+		}
+
+		// Extract References header
+		if r := msg.GetBody(section); r != nil {
+			headerBytes, _ := ioutil.ReadAll(r)
+			headerStr := string(headerBytes)
+			// Parse "References: <...>"
+			if idx := strings.Index(headerStr, ":"); idx > -1 {
+				refs := strings.TrimSpace(headerStr[idx+1:])
+				// Split by whitespace
+				email.References = strings.Fields(refs)
+			}
+		}
+
+		emails = append(emails, email)
+	}
+
+	if err := <-done; err != nil {
+		return emails, fmt.Errorf("error during fetch: %v", err)
+	}
+
+	return emails, nil
+}
+
+// FetchThreads retrieves messages and organizes them into threads using JWZ algorithm
+func (c *Client) FetchThreads(folderName string, limit uint32) ([]*models.EmailThread, error) {
+	// First, fetch all messages
+	emails, err := c.FetchMessages(folderName, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract threading info from message headers
+	for i := range emails {
+		email := &emails[i]
+		
+		// Ensure MessageID exists
+		if email.MessageID == "" {
+			email.MessageID = email.ID // Fallback to UID
+		}
+
+		// References were populated in FetchMessages
+		
+		// In-Reply-To is part of Envelope, so it should be there, but verify processMessage logic
+		if email.InReplyTo == "" && len(email.References) > 0 {
+			// Some clients only send References. The last reference is usually the parent.
+			email.InReplyTo = email.References[len(email.References)-1]
+		}
+	}
+
+	// Build threads using JWZ algorithm
+	threadBuilder := utils.NewThreadBuilder()
+	threads := threadBuilder.BuildThreads(convertToEmailPointers(emails))
+
+	return threads, nil
+}
+
+// Helper function to convert []models.Email to []*models.Email
+func convertToEmailPointers(emails []models.Email) []*models.Email {
+	result := make([]*models.Email, len(emails))
+	for i := range emails {
+		result[i] = &emails[i]
+	}
+	return result
+}
+
+
+// FetchMessagesPaginated retrieves messages with pagination support
+func (c *Client) FetchMessagesPaginated(folderName string, page, pageSize uint32) (*models.PaginatedEmails, error) {
+	mbox, err := c.client.Select(folderName, false)
+	if err != nil {
+		return nil, fmt.Errorf("error selecting folder %s: %v", folderName, err)
+	}
+
+	if mbox.Messages == 0 {
+		return models.NewPaginatedEmails([]models.Email{}, page, pageSize, 0), nil
+	}
+
+	// Calculate message range for the requested page
+	totalMessages := mbox.Messages
+	totalPages := (totalMessages + pageSize - 1) / pageSize
+	
+	// Validate page number
+	if page < 1 {
+		page = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	// Calculate start and end indices (IMAP uses 1-based indexing, newest messages have higher indices)
+	// We want to show newest messages first
+	end := totalMessages - ((page - 1) * pageSize)
+	start := end - pageSize + 1
+	if start < 1 {
+		start = 1
+	}
+
+	seqSet := new(imap.SeqSet)
+	seqSet.AddRange(start, end)
+
+	messages := make(chan *imap.Message, pageSize)
 	items := []imap.FetchItem{
 		imap.FetchEnvelope,
 		imap.FetchFlags,
@@ -65,10 +197,15 @@ func (c *Client) FetchMessages(folderName string, limit uint32) ([]models.Email,
 	}
 
 	if err := <-done; err != nil {
-		return emails, fmt.Errorf("error during fetch: %v", err)
+		return nil, fmt.Errorf("error during fetch: %v", err)
 	}
 
-	return emails, nil
+	// Reverse the emails array to show newest first
+	for i, j := 0, len(emails)-1; i < j; i, j = i+1, j-1 {
+		emails[i], emails[j] = emails[j], emails[i]
+	}
+
+	return models.NewPaginatedEmails(emails, page, pageSize, totalMessages), nil
 }
 
 func (c *Client) FetchSingleMessage(folderName, uid string) (models.Email, error) {
@@ -194,6 +331,46 @@ func (c *Client) setMessageFlag(folderName, uid string, flag string, add bool) e
 	err = c.client.UidStore(seqSet, item, flags, nil)
 	if err != nil {
 		return fmt.Errorf("error setting message flag: %v", err)
+	}
+
+	return nil
+}
+
+// MoveMessage moves a message from one folder to another
+func (c *Client) MoveMessage(sourceFolder, targetFolder, uid string) error {
+	uidNum, err := parseUID(uid)
+	if err != nil {
+		return fmt.Errorf("invalid UID: %v", err)
+	}
+
+	// Select source folder
+	_, err = c.client.Select(sourceFolder, false)
+	if err != nil {
+		return fmt.Errorf("error selecting source folder %s: %v", sourceFolder, err)
+	}
+
+	seqSet := new(imap.SeqSet)
+	seqSet.AddNum(uidNum)
+
+	// Copy to target folder
+	err = c.client.UidCopy(seqSet, targetFolder)
+	if err != nil {
+		return fmt.Errorf("error copying message to %s: %v", targetFolder, err)
+	}
+
+	// Mark as deleted in source folder
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	flags := []interface{}{imap.DeletedFlag}
+
+	err = c.client.UidStore(seqSet, item, flags, nil)
+	if err != nil {
+		return fmt.Errorf("error marking message as deleted: %v", err)
+	}
+
+	// Expunge to permanently remove from source
+	err = c.client.Expunge(nil)
+	if err != nil {
+		return fmt.Errorf("error expunging mailbox: %v", err)
 	}
 
 	return nil
@@ -354,8 +531,10 @@ func (c *Client) processMessage(msg *imap.Message) (models.Email, error) {
 					email.Body = string(partData)
 					log.Printf("Found plain text: %d bytes", len(email.Body))
 				case strings.Contains(partType, "text/html"):
-					email.HTML = template.HTML(partData)
-					log.Printf("Found HTML: %d bytes", len(string(email.HTML)))
+					// Sanitize HTML to prevent XSS
+					sanitized := utils.SanitizeHTML(string(partData))
+					email.HTML = template.HTML(sanitized)
+					log.Printf("Found HTML: %d bytes (sanitized)", len(string(email.HTML)))
 				}
 			}
 		} else {
@@ -512,4 +691,80 @@ func (c *Client) getMessageBody(msg *imap.Message, wantHTML bool) string {
 
 	body, _ := findSection(msg.BodyStructure, nil)
 	return body
+}
+
+// FetchMessagesByUIDs retrieves messages for a specific list of UIDs
+func (c *Client) FetchMessagesByUIDs(folderName string, uids []uint32) ([]models.Email, error) {
+	if len(uids) == 0 {
+		return []models.Email{}, nil
+	}
+
+	_, err := c.client.Select(folderName, false)
+	if err != nil {
+		return nil, fmt.Errorf("error selecting folder %s: %v", folderName, err)
+	}
+
+	seqSet := new(imap.SeqSet)
+	seqSet.AddNum(uids...)
+
+	// Add header fetch for References (same as FetchMessages)
+	// Add header fetch for References (same as FetchMessages)
+	section := &imap.BodySectionName{
+		BodyPartName: imap.BodyPartName{
+			Specifier: imap.HeaderSpecifier,
+			Fields:    []string{"REFERENCES"},
+		},
+		Peek: true,
+	}
+
+	items := []imap.FetchItem{
+		imap.FetchEnvelope,
+		imap.FetchFlags,
+		imap.FetchBody,
+		imap.FetchBodyStructure,
+		imap.FetchUid,
+		section.FetchItem(),
+	}
+
+	messages := make(chan *imap.Message, len(uids))
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.client.UidFetch(seqSet, items, messages)
+	}()
+
+	var emails []models.Email
+	for msg := range messages {
+		email, err := c.processMessage(msg)
+		if err != nil {
+			fmt.Printf("Error processing message %d: %v\n", msg.Uid, err)
+			continue
+		}
+		
+		// Extract References header
+		if r := msg.GetBody(section); r != nil {
+			headerBytes, _ := ioutil.ReadAll(r)
+			headerStr := string(headerBytes)
+			if idx := strings.Index(headerStr, ":"); idx > -1 {
+				refs := strings.TrimSpace(headerStr[idx+1:])
+				email.References = strings.Fields(refs)
+			}
+		}
+
+		emails = append(emails, email)
+	}
+
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("fetch error: %v", err)
+	}
+
+	// Reverse emails to show newest first for search results?
+	// Usually search results are best shown by Date descending.
+	// Since we fetched by UIDs, order might be arbitrary or ascending.
+	// We'll rely on the client sort or sort here if needed.
+	// Let's sort by Date Descending.
+	// (Simple bubble sort for now or leave as is)
+	// Leaving as is to minimize dependencies.
+	
+	return emails, nil
 }

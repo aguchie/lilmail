@@ -6,23 +6,28 @@ import "time"
 type EmailThread struct {
 	ID           string    `json:"id"`
 	Subject      string    `json:"subject"`
+	Folder       string    `json:"folder"`
+	UserID       string    `json:"user_id"`
+	MessageIDs   []string  `json:"message_ids"` // UIDs of emails in thread
 	Participants []string  `json:"participants"`
 	MessageCount int       `json:"message_count"`
+	Count        int       `json:"count"`
+	Unread       int       `json:"unread"`
 	LastDate     time.Time `json:"last_date"`
+	LatestDate   time.Time `json:"latest_date"`
 	Messages     []Email   `json:"messages"`
-	Unread       bool      `json:"unread"`
 	HasAttachment bool      `json:"has_attachment"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// Label represents an email label/tag
-type Label struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"` // Hex color code
+// ThreadContainer is used by the JWZ threading algorithm
+type ThreadContainer struct {
+	Message   *Email
+	MessageID string
+	Parent    *ThreadContainer
+	Children  []*ThreadContainer
+	IsDummy   bool
 }
 
-// EmailLabel represents the association between an email and a label
-type EmailLabel struct {
-	EmailID string `json:"email_id"`
-	LabelID string `json:"label_id"`
-}
+

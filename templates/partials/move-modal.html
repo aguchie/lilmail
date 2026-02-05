@@ -1,0 +1,167 @@
+{{ define "move-modal" }}
+<div x-data="{ 
+    showMoveModal: false,
+    emailId: null,
+    currentFolder: '',
+    targetFolder: '',
+    folders: [], // Should be populated from server or passed in
+    
+    init() {
+        window.addEventListener('open-move-modal', (e) => {
+            this.emailId = e.detail.emailId;
+            this.currentFolder = e.detail.currentFolder;
+            this.showMoveModal = true;
+            this.fetchFolders();
+        });
+    },
+
+    fetchFolders() {
+        // We can get folders from the DOM if available, or fetch
+        // For now, let's grab them from the sidebar links if possible
+        // Or fetch from API
+        fetch('/api/folders', {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                // exclude current folder
+                this.folders = data.folders.filter(f => f.name !== this.currentFolder);
+            }
+        });
+    },
+
+    moveEmail() {
+        if (!this.targetFolder) return;
+
+        fetch(`/api/email/${this.emailId}/move`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            },
+            body: JSON.stringify({
+                destination: this.targetFolder,
+                folder: this.currentFolder
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                window.toastManager.show('Email moved', 'success');
+                // Remove from view
+                document.querySelector(`[data-email-id='${this.emailId}']`)?.remove();
+                this.showMoveModal = false;
+            } else {
+                window.toastManager.show(data.error || 'Failed to move', 'error');
+            }
+        })
+        .catch(err => {
+             window.toastManager.show('Network error', 'error');
+        });
+    }
+}" x-show="showComposeModal" class="hidden">
+    <!-- Reusing structure or creating new? 
+         This is a hidden snippet. We need to wrap it properly. 
+    -->
+</div>
+
+<!-- Actual Modal Structure -->
+<div x-data="{ 
+    show: false,
+    emailId: null,
+    currentFolder: '',
+    targetFolder: '',
+    folders: [],
+    
+    init() {
+        window.addEventListener('open-move-modal', (e) => {
+            this.emailId = e.detail.emailId;
+            this.currentFolder = e.detail.currentFolder;
+            this.show = true;
+            this.fetchFolders();
+        });
+    },
+
+    fetchFolders() {
+        fetch('/api/folders', {
+             headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                 this.folders = data.folders.filter(f => f.name !== this.currentFolder);
+            }
+        });
+    },
+
+    moveEmail() {
+        if (!this.targetFolder) return;
+        
+        fetch(`/api/email/${this.emailId}/move`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            },
+            body: JSON.stringify({
+                destination: this.targetFolder,
+                folder: this.currentFolder
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                window.toastManager.show('Email moved', 'success');
+                 document.querySelector(`[data-email-id='${this.emailId}']`)?.remove();
+                this.show = false;
+            } else {
+                 window.toastManager.show('Failed to move', 'error');
+            }
+        })
+    }
+}" x-show="show" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
+    <div class="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+        <div class="fixed inset-0 transition-opacity" aria-hidden="true" @click="show = false">
+            <div class="absolute inset-0 bg-gray-500 opacity-75"></div>
+        </div>
+
+        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+        <div
+            class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+            <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div class="sm:flex sm:items-start">
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Move Email
+                        </h3>
+                        <div class="mt-2">
+                            <p class="text-sm text-gray-500">
+                                Select destination folder:
+                            </p>
+                            <select x-model="targetFolder"
+                                class="mt-2 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                                <option value="">Select a folder...</option>
+                                <template x-for="folder in folders" :key="folder.name">
+                                    <option :value="folder.name" x-text="folder.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button type="button" @click="moveEmail"
+                    class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm">
+                    Move
+                </button>
+                <button type="button" @click="show = false"
+                    class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{{ end }}

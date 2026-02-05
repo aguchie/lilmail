@@ -2,190 +2,120 @@ package api
 
 import (
 	"fmt"
+	"time"
 	"lilmail/config"
 	"lilmail/models"
-	"lilmail/utils"
-	"strings"
-	"time"
 
+	"github.com/emersion/go-imap"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/session"
 )
 
-// SearchHandler handles email search requests
 type SearchHandler struct {
 	store  *session.Store
 	config *config.Config
 }
 
-// NewSearchHandler creates a new search handler
-func NewSearchHandler(store *session.Store, cfg *config.Config) *SearchHandler {
+func NewSearchHandler(store *session.Store, config *config.Config) *SearchHandler {
 	return &SearchHandler{
 		store:  store,
-		config: cfg,
+		config: config,
 	}
 }
 
-// SearchRequest represents a search request
-type SearchRequest struct {
-	Query       string `json:"query"`
-	Folder      string `json:"folder"`
-	SearchIn    string `json:"search_in"`    // "all", "from", "to", "subject", "body"
-	HasAttachment bool   `json:"has_attachment"`
-	DateFrom    string `json:"date_from"`
-	DateTo      string `json:"date_to"`
-	Page        int    `json:"page"`
-	PageSize    int    `json:"page_size"`
-}
+	// HandleSearch performs search on IMAP server
+	func (h *SearchHandler) HandleSearch(c *fiber.Ctx) error {
+		// Parse search parameters
+		query := c.FormValue("query")
+		folder := c.Query("folder", "INBOX")
+		scope := c.FormValue("scope", "all")
+		dateFromStr := c.FormValue("dateFrom")
+		dateToStr := c.FormValue("dateTo")
+		hasAttachment := c.FormValue("hasAttachment") == "on" // HTML checkbox sends "on"
 
-// HandleSearch processes an email search request
-func (h *SearchHandler) HandleSearch(c *fiber.Ctx) error {
-	// Parse request
-	var req SearchRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid request",
-		})
-	}
+		// Create IMAP Client from session credentials
+		creds, err := GetCredentials(c, h.store, h.config.Encryption.Key)
+		if err != nil {
+			return c.Status(401).SendString("Unauthorized")
+		}
 
-	// Default values
-	if req.Folder == "" {
-		req.Folder = "INBOX"
-	}
-	if req.SearchIn == "" {
-		req.SearchIn = "all"
-	}
-	if req.Page < 1 {
-		req.Page = 1
-	}
-	if req.PageSize < 1 {
-		req.PageSize = 50
-	}
+		client, err := createIMAPClientFromCredentials(creds, h.config)
+		if err != nil {
+			return c.Status(500).SendString("Failed to connect to mail server")
+		}
+		defer client.Close()
 
-	// Get session credentials
-	credentials, err := GetCredentials(c, h.store, h.config.Encryption.Key)
-	if err != nil {
-		return utils.UnauthorizedError("Invalid session", err)
-	}
-
-	// Create IMAP client
-	client, err := createIMAPClientFromCredentials(credentials, h.config)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to connect to email server",
-		})
-	}
-	defer client.Close()
-
-	// Fetch all messages from folder
-	allEmails, err := client.FetchMessages(req.Folder, 1000) // Limit to 1000 messages
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": fmt.Sprintf("Failed to fetch messages: %v", err),
-		})
-	}
-
-	// Filter emails based on search criteria
-	filteredEmails := h.filterEmails(allEmails, req)
-
-	// Parse date filters if provided
-	var dateFrom, dateTo time.Time
-	if req.DateFrom != "" {
-		dateFrom, _ = time.Parse("2006-01-02", req.DateFrom)
-	}
-	if req.DateTo != "" {
-		dateTo, _ = time.Parse("2006-01-02", req.DateTo)
-	}
-
-	// Apply date filters
-	if !dateFrom.IsZero() || !dateTo.IsZero() {
-		filtered := []models.Email{}
-		for _, email := range filteredEmails {
-			if !dateFrom.IsZero() && email.Date.Before(dateFrom) {
-				continue
+		// Perform Search
+		criteria := imap.NewSearchCriteria()
+		
+		if query != "" {
+			switch scope {
+			case "from":
+				criteria.Header.Add("From", query)
+			case "to":
+				criteria.Header.Add("To", query)
+			case "subject":
+				criteria.Header.Add("Subject", query)
+			case "body":
+				criteria.Body = []string{query}
+			default:
+				// Search all reasonable fields
+				// Note: Text criteria usually searches Subject, From, To, Cc, Bcc, and Body
+				criteria.Text = []string{query}
 			}
-			if !dateTo.IsZero() && email.Date.After(dateTo.Add(24*time.Hour)) {
-				continue
+		}
+
+		// Date Filters
+		if dateFromStr != "" {
+			if dateFrom, err := time.Parse("2006-01-02", dateFromStr); err == nil {
+				criteria.Since = dateFrom
 			}
-			filtered = append(filtered, email)
 		}
-		filteredEmails = filtered
-	}
-
-	// Calculate pagination
-	totalEmails := uint32(len(filteredEmails))
-	
-	// Get page of results
-	start := (req.Page - 1) * req.PageSize
-	end := start + req.PageSize
-	if start > len(filteredEmails) {
-		start = len(filteredEmails)
-	}
-	if end > len(filteredEmails) {
-		end = len(filteredEmails)
-	}
-
-	pageEmails := filteredEmails[start:end]
-
-	// Create response
-	result := models.NewPaginatedEmails(
-		pageEmails,
-		uint32(req.Page),
-		uint32(req.PageSize),
-		totalEmails,
-	)
-
-	utils.Log.Info("Search completed: query='%s' folder='%s' results=%d", req.Query, req.Folder, totalEmails)
-
-	return c.JSON(result)
-}
-
-// filterEmails filters emails based on search criteria
-func (h *SearchHandler) filterEmails(emails []models.Email, req SearchRequest) []models.Email {
-	if req.Query == "" && !req.HasAttachment {
-		return emails
-	}
-
-	query := strings.ToLower(req.Query)
-	filtered := []models.Email{}
-
-	for _, email := range emails {
-		match := false
-
-		// Check attachment filter
-		if req.HasAttachment && !email.HasAttachments {
-			continue
+		if dateToStr != "" {
+			if dateTo, err := time.Parse("2006-01-02", dateToStr); err == nil {
+				// Search Before is strictly before, so we add 1 day to include the end date
+				criteria.Before = dateTo.AddDate(0, 0, 1)
+			}
 		}
 
-		// If no query, just check attachment filter
-		if req.Query == "" {
-			filtered = append(filtered, email)
-			continue
+		// Attachment Filter
+		// Note: IMAP doesn't have a standard HAS_ATTACHMENT flag.
+		// Common workaround is checking Content-Type or Body structure.
+		// Checking Header "Content-Type" for "multipart/mixed" is a common approximation.
+		if hasAttachment {
+			criteria.Header.Add("Content-Type", "multipart/mixed")
 		}
 
-		// Search based on searchIn parameter
-		switch req.SearchIn {
-		case "from":
-			match = strings.Contains(strings.ToLower(email.From), query) ||
-				strings.Contains(strings.ToLower(email.FromName), query)
-		case "to":
-			match = strings.Contains(strings.ToLower(email.To), query)
-		case "subject":
-			match = strings.Contains(strings.ToLower(email.Subject), query)
-		case "body":
-			match = strings.Contains(strings.ToLower(email.Body), query)
-		default: // "all"
-			match = strings.Contains(strings.ToLower(email.From), query) ||
-				strings.Contains(strings.ToLower(email.FromName), query) ||
-				strings.Contains(strings.ToLower(email.To), query) ||
-				strings.Contains(strings.ToLower(email.Subject), query) ||
-				strings.Contains(strings.ToLower(email.Body), query)
+		// Select folder
+		_, err = client.client.Select(folder, false)
+		if err != nil {
+			return c.Status(500).SendString("Folder selection failed")
 		}
 
-		if match {
-			filtered = append(filtered, email)
+		// Execute Search
+		uids, err := client.client.Search(criteria)
+		if err != nil {
+			return c.Status(500).SendString("Search failed")
 		}
+
+		if len(uids) == 0 {
+			// Return empty list partial
+			return c.Render("partials/email-list", fiber.Map{
+				"Emails":        []models.Email{},
+				"CurrentFolder": folder,
+				"Pagination":    nil,
+			})
+		}
+
+		// Fetch messages for UIDs
+		messages, err := client.FetchMessagesByUIDs(folder, uids)
+		if err != nil {
+			return c.Status(500).SendString(fmt.Sprintf("Failed to fetch search results: %v", err))
+		}
+
+		return c.Render("partials/email-list", fiber.Map{
+			"Emails":        messages,
+			"CurrentFolder": folder,
+			"Pagination":    nil, // Search results are not paginated yet
+		}, "")
 	}
-
-	return filtered
-}

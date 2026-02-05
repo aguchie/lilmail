@@ -13,11 +13,13 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
+	"github.com/gofiber/fiber/v2/middleware/csrf"
 	"github.com/gofiber/fiber/v2/middleware/helmet"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/fiber/v2/middleware/session"
 	"github.com/gofiber/template/html/v2"
+	"github.com/gofiber/websocket/v2"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 )
 
@@ -155,7 +157,7 @@ func main() {
 		ContentTypeNosniff:    "nosniff",
 		XFrameOptions:         "SAMEORIGIN",
 		ReferrerPolicy:        "no-referrer",
-		ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
+		ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.quilljs.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.quilljs.com; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';",
 	}))
 	
 	// Add locale middleware
@@ -170,14 +172,45 @@ func main() {
 		CacheDuration: 24 * time.Hour,
 	})
 
-	// Initialize web handlers
-	webAuthHandler := web.NewAuthHandler(store, config)
-	webEmailHandler := web.NewEmailHandler(store, config, webAuthHandler)
+	// Initialize storage layers
+	accountStorage, err := storage.NewAccountStorage("./data")
+	if err != nil {
+		utils.Log.Error("Failed to initialize account storage: %v", err)
+	}
+
+	userStorage, err := storage.NewUserStorage("./data")
+	if err != nil {
+		utils.Log.Error("Failed to initialize user storage: %v", err)
+	}
+
+	// Web handlers initialized later with NotificationHandler
+
+	_, err = storage.NewThreadStorage("./data")
+	if err != nil {
+		utils.Log.Error("Failed to initialize thread storage: %v", err)
+	}
+
+	draftStorage := storage.NewDraftStorage("./data")
+
+	labelStorage, err := storage.NewLabelStorage("./data")
+	if err != nil {
+		utils.Log.Error("Failed to initialize label storage: %v", err)
+	}
+	defer labelStorage.Close()
+
+	// Initialize Notification Handler
+	notificationHandler := api.NewNotificationHandler(store)
 
 	// Initialize API handlers
 	searchHandler := api.NewSearchHandler(store, config)
 	folderHandler := api.NewFolderHandler(store, config)
+	accountHandler := api.NewAccountHandler(store, config, accountStorage)
+	labelHandler := api.NewLabelHandler(store, labelStorage)
 	i18nHandler := &api.I18nHandler{}
+
+	// Initialize web handlers
+	webAuthHandler := web.NewAuthHandler(store, config, userStorage, accountStorage)
+	webEmailHandler := web.NewEmailHandler(store, config, webAuthHandler, notificationHandler)
 
 	// Public routes
 	app.Get("/login", webAuthHandler.ShowLogin)
@@ -186,11 +219,28 @@ func main() {
 
 	// Protected routes group
 	protected := app.Group("", api.SessionMiddleware(store))
+	
+	// Add CSRF Middleware to protected routes
+	app.Use(csrf.New(csrf.Config{
+		KeyLookup:      "header:X-CSRF-Token,form:csrf_",
+		CookieName:     "csrf_",
+		CookieSameSite: "Strict",
+		Expiration:     1 * time.Hour,
+		ContextKey:     "csrf",
+	}))
+
+	// Notification Routes
+	protected.Get("/events", notificationHandler.HandleSSE)
+	protected.Get("/ws", websocket.New(notificationHandler.HandleWebSocket))
 
 	// Main web routes
 	protected.Get("/", webEmailHandler.HandleInbox)      // Default to inbox
 	protected.Get("/inbox", webEmailHandler.HandleInbox) // Explicit inbox route
 	protected.Get("/folder/:name", webEmailHandler.HandleFolder)
+
+	// Settings page
+	webSettingsHandler := web.NewSettingsHandler(store, config, userStorage, accountStorage, labelStorage)
+	protected.Get("/settings", webSettingsHandler.ShowSettings)
 
 	// API routes
 	apiRoutes := protected.Group("/api")
@@ -198,6 +248,15 @@ func main() {
 		// Email routes
 		apiRoutes.Get("/email/:id", webEmailHandler.HandleEmailView)
 		apiRoutes.Delete("/email/:id", webEmailHandler.HandleDeleteEmail)
+		apiRoutes.Put("/email/:id/read", webEmailHandler.HandleMarkRead)
+		apiRoutes.Put("/email/:id/unread", webEmailHandler.HandleMarkUnread)
+		apiRoutes.Post("/email/:id/move", webEmailHandler.HandleMoveEmail)
+
+		// Reply and forward routes
+		replyHandler := web.NewReplyHandler(store, config, webAuthHandler)
+		apiRoutes.Get("/reply/:id", replyHandler.HandleReply)
+		apiRoutes.Get("/replyall/:id", replyHandler.HandleReplyAll)
+		apiRoutes.Get("/forward/:id", replyHandler.HandleForward)
 
 		// Folder routes
 		apiRoutes.Get("/folder/:name/emails", webEmailHandler.HandleFolderEmails)
@@ -211,8 +270,36 @@ func main() {
 		// Search routes
 		apiRoutes.Post("/search", searchHandler.HandleSearch)
 
+		// Account management routes
+		apiRoutes.Get("/accounts", accountHandler.GetAccounts)
+		apiRoutes.Post("/accounts", accountHandler.CreateAccount)
+		apiRoutes.Get("/accounts/:id", accountHandler.GetAccount)
+		apiRoutes.Put("/accounts/:id", accountHandler.UpdateAccount)
+		apiRoutes.Delete("/accounts/:id", accountHandler.DeleteAccount)
+		apiRoutes.Post("/accounts/:id/default", accountHandler.SetDefaultAccount)
+		apiRoutes.Post("/accounts/:id/switch", accountHandler.SwitchAccount)
+
+		// Label routes
+		apiRoutes.Get("/labels", labelHandler.GetLabels)
+		apiRoutes.Post("/labels", labelHandler.CreateLabel)
+		apiRoutes.Delete("/labels/:id", labelHandler.DeleteLabel)
+		apiRoutes.Post("/emails/:emailId/labels/:labelId", labelHandler.AssignLabel)
+		apiRoutes.Delete("/emails/:emailId/labels/:labelId", labelHandler.RemoveLabel)
+		apiRoutes.Get("/emails/:emailId/labels", labelHandler.GetEmailLabels)
+
 		// i18n routes
 		apiRoutes.Get("/i18n/:lang", i18nHandler.GetTranslations)
+
+		// Draft routes
+		draftHandler := api.NewDraftHandler(store, draftStorage)
+		apiRoutes.Get("/drafts", draftHandler.GetDrafts)
+		apiRoutes.Get("/drafts/:id", draftHandler.GetDraft)
+		apiRoutes.Post("/drafts", draftHandler.SaveDraft)
+		apiRoutes.Post("/drafts/autosave", draftHandler.AutoSave)
+		apiRoutes.Delete("/drafts/:id", draftHandler.DeleteDraft)
+
+		// Settings routes
+		apiRoutes.Post("/settings/general", webSettingsHandler.UpdateGeneralSettings)
 	}
 
 	// HTMX routes (partial template renders)

@@ -1,0 +1,93 @@
+{{define "partials/label-picker"}}
+<div class="py-1" x-data="{
+    labels: [],
+    loading: false,
+    
+    init() {
+        this.fetchLabels();
+    },
+
+    fetchLabels() {
+        fetch('/api/labels', {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                this.labels = data.labels;
+            }
+        });
+    },
+
+    hasLabel(labelId) {
+        // We need to check against the current email's labels
+        // The email labels are serverside rendered in the partial, but how do we access them in Alpine?
+        // simple way: check the DOM or pass them via data attribute
+        const emailLabels = document.getElementById('email-labels-data')?.dataset.labels;
+        if (!emailLabels) return false;
+        try {
+            const ids = JSON.parse(emailLabels);
+            return ids.includes(labelId);
+        } catch(e) { return false; }
+    },
+
+    async toggleLabel(labelId) {
+        // Need current state
+        const isAttached = this.hasLabel(labelId);
+        const emailId = '{{.Email.ID}}';
+        
+        // Optimistic update? Or wait? Let's wait for simplicity
+        const method = isAttached ? 'DELETE' : 'POST';
+        
+        try {
+            const res = await fetch(`/api/email/${emailId}/labels/${labelId}`, {
+                method: method,
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                // We need to reload the email viewer or update the UI
+                // HTMX refresh of the email viewer content would be best
+                htmx.trigger('#email-viewer-content', 'refresh-email');
+                if(document.getElementById('email-viewer-content-mobile')) {
+                     htmx.trigger('#email-viewer-content-mobile', 'refresh-email');
+                }
+            }
+        } catch(e) {
+            console.error(e);
+        }
+    }
+}" hx-trigger="refresh-email from:body" hx-get="/api/email/{{.Email.ID}}" hx-target="#email-viewer-content"
+    hx-swap="innerHTML">
+
+    <!-- Store current labels for JS access -->
+    <div id="email-labels-data" data-labels='[{{range $i, $e := .Email.Labels}}{{if $i}},{{end}}"{{$e.ID}}"{{end}}]'
+        class="hidden"></div>
+
+    <template x-for="label in labels" :key="label.id">
+        <button @click="toggleLabel(label.id)"
+            class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center justify-between group">
+            <div class="flex items-center">
+                <div class="w-3 h-3 rounded-full mr-2" :style="`background-color: ${label.color}`"></div>
+                <span x-text="label.name" class="text-gray-700"></span>
+            </div>
+            <!-- Checkmark if selected -->
+            <svg x-show="hasLabel(label.id)" class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor"
+                viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+        </button>
+    </template>
+
+    <div x-show="labels.length === 0" class="px-4 py-2 text-sm text-gray-500">
+        {{t "labels_none"}}
+    </div>
+
+    <div class="border-t border-gray-100 mt-1 pt-1">
+        <a href="/settings" class="block w-full text-left px-4 py-2 text-xs text-blue-600 hover:bg-blue-50">
+            {{t "labels_manage"}}
+        </a>
+    </div>
+</div>
+{{end}}
