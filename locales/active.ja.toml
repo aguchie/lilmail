@@ -1,0 +1,269 @@
+# 一般的なUI要素
+[app_name]
+other = "LilMail"
+
+[app_description]
+other = "軽量Webメールクライアント"
+
+# ナビゲーション
+[nav_inbox]
+other = "受信箱"
+
+[nav_sent]
+other = "送信済み"
+
+[nav_drafts]
+other = "下書き"
+
+[nav_trash]
+other = "ゴミ箱"
+
+[nav_folders]
+other = "フォルダー"
+
+[nav_settings]
+other = "設定"
+
+[nav_logout]
+other = "ログアウト"
+
+# ログインページ
+[login_title]
+other = "ログイン"
+
+[login_email]
+other = "メールアドレス"
+
+[login_password]
+other = "パスワード"
+
+[login_button]
+other = "ログイン"
+
+[login_error]
+other = "ログインに失敗しました。メールアドレスとパスワードを確認してください。"
+
+# メール一覧
+[email_from]
+other = "送信者"
+
+[email_subject]
+other = "件名"
+
+[email_date]
+other = "日付"
+
+[email_size]
+other = "サイズ"
+
+[email_no_messages]
+other = "メールがありません"
+
+[email_loading]
+other = "読み込み中..."
+
+# メール詳細
+[email_to]
+other = "宛先"
+
+[email_cc]
+other = "CC"
+
+[email_attachments]
+other = "添付ファイル"
+
+[email_download]
+other = "ダウンロード"
+
+[email_reply]
+other = "返信"
+
+[email_reply_all]
+other = "全員に返信"
+
+[email_forward]
+other = "転送"
+
+[email_delete]
+other = "削除"
+
+[email_mark_read]
+other = "既読にする"
+
+[email_mark_unread]
+other = "未読にする"
+
+# メール作成
+[compose_new_email]
+other = "新規メール作成"
+
+[compose_to]
+other = "宛先"
+
+[compose_cc]
+other = "CC"
+
+[compose_bcc]
+other = "BCC"
+
+[compose_subject]
+other = "件名"
+
+[compose_body]
+other = "本文"
+
+[compose_attach]
+other = "ファイル添付"
+
+[compose_send]
+other = "送信"
+
+[compose_save_draft]
+other = "下書き保存"
+
+[compose_discard]
+other = "破棄"
+
+# 検索
+[search_placeholder]
+other = "メールを検索..."
+
+[search_all]
+other = "すべて"
+
+[search_from]
+other = "送信者"
+
+[search_to]
+other = "宛先"
+
+[search_subject_only]
+other = "件名のみ"
+
+[search_body]
+other = "本文"
+
+[search_has_attachments]
+other = "添付ファイルあり"
+
+[search_date_from]
+other = "開始日"
+
+[search_date_to]
+other = "終了日"
+
+[search_no_results]
+other = "検索結果がありません"
+
+# フォルダー管理
+[folder_create]
+other = "新規フォルダー作成"
+
+[folder_rename]
+other = "名前変更"
+
+[folder_delete]
+other = "削除"
+
+[folder_name]
+other = "フォルダー名"
+
+[folder_confirm_delete]
+other = "このフォルダーを削除してもよろしいですか？"
+
+# 設定
+[settings_title]
+other = "設定"
+
+[settings_language]
+other = "言語"
+
+[settings_theme]
+other = "テーマ"
+
+[settings_theme_light]
+other = "ライト"
+
+[settings_theme_dark]
+other = "ダーク"
+
+[settings_theme_auto]
+other = "システム設定に従う"
+
+[settings_page_size]
+other = "1ページあたりの表示件数"
+
+[settings_save]
+other = "保存"
+
+[settings_cancel]
+other = "キャンセル"
+
+# メッセージ
+[message_sent_success]
+other = "メールを送信しました"
+
+[message_saved_draft]
+other = "下書きを保存しました"
+
+[message_deleted]
+other = "削除しました"
+
+[message_error]
+other = "エラーが発生しました"
+
+[message_connection_error]
+other = "サーバーに接続できません"
+
+# 確認ダイアログ
+[confirm_delete_email]
+other = "このメールを削除してもよろしいですか？"
+
+[confirm_yes]
+other = "はい"
+
+[confirm_no]
+other = "いいえ"
+
+# エラーメッセージ
+[error_404]
+other = "ページが見つかりません"
+
+[error_500]
+other = "サーバーエラーが発生しました"
+
+[error_network]
+other = "ネットワークエラー"
+
+[error_invalid_email]
+other = "有効なメールアドレスを入力してください"
+
+[error_required_field]
+other = "必須項目です"
+
+# 時間表記
+[time_just_now]
+other = "たった今"
+
+[time_minutes_ago]
+one = "{{.Count}}分前"
+other = "{{.Count}}分前"
+
+[time_hours_ago]
+one = "{{.Count}}時間前"
+other = "{{.Count}}時間前"
+
+[time_days_ago]
+one = "{{.Count}}日前"
+other = "{{.Count}}日前"
+
+# スレッド表示
+[thread_messages]
+one = "{{.Count}}件のメッセージ"
+other = "{{.Count}}件のメッセージ"
+
+[thread_expand]
+other = "スレッドを展開"
+
+[thread_collapse]
+other = "スレッドを折りたたむ"

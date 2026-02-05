@@ -5,25 +5,32 @@ import (
 	"lilmail/config"
 	"lilmail/handlers/api"
 	"lilmail/handlers/web"
+	"lilmail/middleware"
 	"lilmail/storage"
-	"log"
+	"lilmail/utils"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/compress"
+	"github.com/gofiber/fiber/v2/middleware/helmet"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/fiber/v2/middleware/session"
 	"github.com/gofiber/template/html/v2"
+	"github.com/nicksnyder/go-i18n/v2/i18n"
 )
 
 var store *session.Store
 
 func init() {
+	// Initialize logger
+	utils.Log.Info("Initializing LilMail...")
+
 	// Create file storage
 	storage, err := storage.NewFileStorage("./sessions")
 	if err != nil {
-		log.Fatal("Failed to initialize session storage:", err)
+		utils.Log.Error("Failed to initialize session storage: %v", err)
 	}
 
 	store = session.New(session.Config{
@@ -54,7 +61,12 @@ func main() {
 	// Load configuration
 	config, err := config.LoadConfig("config.toml")
 	if err != nil {
-		log.Fatal("Failed to load config:", err)
+		utils.Log.Error("Failed to load config: %v", err)
+	}
+
+	// Initialize i18n system
+	if err := utils.InitI18n(); err != nil {
+		utils.Log.Error("Failed to initialize i18n: %v", err)
 	}
 
 	// Initialize template engine with custom functions
@@ -68,6 +80,20 @@ func main() {
 	engine.AddFunc("title", strings.Title)
 	engine.AddFunc("trim", strings.TrimSpace)
 	engine.AddFunc("hasPrefix", strings.HasPrefix)
+
+	// i18n template functions
+	engine.AddFunc("t", func(messageID string) string {
+		// This will be overridden per-request with the correct localizer
+		return utils.T(utils.Localizer, messageID)
+	})
+
+	engine.AddFunc("tWithData", func(messageID string, data map[string]interface{}) string {
+		return utils.TWithData(utils.Localizer, messageID, data)
+	})
+
+	engine.AddFunc("tPlural", func(messageID string, count int) string {
+		return utils.TPlural(utils.Localizer, messageID, count)
+	})
 
 	// Date formatting function
 	engine.AddFunc("formatDate", func(t time.Time) string {
@@ -96,7 +122,12 @@ func main() {
 		ViewsLayout: "layouts/main", // Default layout
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
-			if e, ok := err.(*fiber.Error); ok {
+			
+			// Check for AppError
+			if appErr, ok := err.(*utils.AppError); ok {
+				code = appErr.Code
+				utils.Log.Error("Application error: %v", appErr)
+			} else if e, ok := err.(*fiber.Error); ok {
 				code = e.Code
 			}
 
@@ -115,9 +146,23 @@ func main() {
 		},
 	})
 
-	// Add middleware
+	// Add global middleware
 	app.Use(recover.New()) // Recover from panics
 	app.Use(logger.New())  // Request logging
+	app.Use(compress.New()) // Response compression
+	app.Use(helmet.New(helmet.Config{ // Security headers
+		XSSProtection:         "1; mode=block",
+		ContentTypeNosniff:    "nosniff",
+		XFrameOptions:         "SAMEORIGIN",
+		ReferrerPolicy:        "no-referrer",
+		ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
+	}))
+	
+	// Add locale middleware
+	app.Use(middleware.LocaleMiddleware())
+
+	// Add rate limiting (100 requests per minute per IP)
+	app.Use(middleware.RateLimiter(100, time.Minute))
 
 	// Serve static files
 	app.Static("/assets", "./assets", fiber.Static{
@@ -128,6 +173,11 @@ func main() {
 	// Initialize web handlers
 	webAuthHandler := web.NewAuthHandler(store, config)
 	webEmailHandler := web.NewEmailHandler(store, config, webAuthHandler)
+
+	// Initialize API handlers
+	searchHandler := api.NewSearchHandler(store, config)
+	folderHandler := api.NewFolderHandler(store, config)
+	i18nHandler := &api.I18nHandler{}
 
 	// Public routes
 	app.Get("/login", webAuthHandler.ShowLogin)
@@ -142,18 +192,27 @@ func main() {
 	protected.Get("/inbox", webEmailHandler.HandleInbox) // Explicit inbox route
 	protected.Get("/folder/:name", webEmailHandler.HandleFolder)
 
-	// API routes - Keep these paths exactly as they were before
+	// API routes
 	apiRoutes := protected.Group("/api")
 	{
 		// Email routes
 		apiRoutes.Get("/email/:id", webEmailHandler.HandleEmailView)
 		apiRoutes.Delete("/email/:id", webEmailHandler.HandleDeleteEmail)
 
-		// Folder routes - This is the important fix
-		apiRoutes.Get("/folder/:name/emails", webEmailHandler.HandleFolderEmails) // Match the path in HTML
+		// Folder routes
+		apiRoutes.Get("/folder/:name/emails", webEmailHandler.HandleFolderEmails)
+		apiRoutes.Post("/folder", folderHandler.CreateFolder)
+		apiRoutes.Delete("/folder/:name", folderHandler.DeleteFolder)
+		apiRoutes.Put("/folder", folderHandler.RenameFolder)
 
 		// Composition routes
 		apiRoutes.Post("/compose", webEmailHandler.HandleComposeEmail)
+
+		// Search routes
+		apiRoutes.Post("/search", searchHandler.HandleSearch)
+
+		// i18n routes
+		apiRoutes.Get("/i18n/:lang", i18nHandler.GetTranslations)
 	}
 
 	// HTMX routes (partial template renders)
@@ -165,25 +224,30 @@ func main() {
 
 	// Health check endpoint
 	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.SendString("OK")
+		return c.JSON(fiber.Map{
+			"status": "ok",
+			"time":   time.Now().Format(time.RFC3339),
+		})
 	})
 
 	// 404 Handler for undefined routes
 	app.Use(func(c *fiber.Ctx) error {
+		localizer := c.Locals("localizer").(*i18n.Localizer)
+		
 		if isAPIRequest(c) {
 			return c.Status(404).JSON(fiber.Map{
-				"error": "Not Found",
+				"error": utils.T(localizer, "error_404"),
 			})
 		}
 		return c.Status(404).Render("error", fiber.Map{
-			"Error": "Page not found",
+			"Error": utils.T(localizer, "error_404"),
 			"Code":  404,
 		})
 	})
 
 	// Start server
-	log.Printf("Starting server on port %d...\n", config.Server.Port)
+	utils.Log.Info("Starting server on port %d...", config.Server.Port)
 	if err := app.Listen(fmt.Sprintf(":%d", config.Server.Port)); err != nil {
-		log.Fatal("Error starting server: ", err)
+		utils.Log.Error("Error starting server: %v", err)
 	}
 }

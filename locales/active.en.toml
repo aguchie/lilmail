@@ -1,0 +1,269 @@
+# General UI elements
+[app_name]
+other = "LilMail"
+
+[app_description]
+other = "Lightweight Webmail Client"
+
+# Navigation
+[nav_inbox]
+other = "Inbox"
+
+[nav_sent]
+other = "Sent"
+
+[nav_drafts]
+other = "Drafts"
+
+[nav_trash]
+other = "Trash"
+
+[nav_folders]
+other = "Folders"
+
+[nav_settings]
+other = "Settings"
+
+[nav_logout]
+other = "Logout"
+
+# Login page
+[login_title]
+other = "Login"
+
+[login_email]
+other = "Email Address"
+
+[login_password]
+other = "Password"
+
+[login_button]
+other = "Login"
+
+[login_error]
+other = "Login failed. Please check your email and password."
+
+# Email list
+[email_from]
+other = "From"
+
+[email_subject]
+other = "Subject"
+
+[email_date]
+other = "Date"
+
+[email_size]
+other = "Size"
+
+[email_no_messages]
+other = "No messages"
+
+[email_loading]
+other = "Loading..."
+
+# Email details
+[email_to]
+other = "To"
+
+[email_cc]
+other = "CC"
+
+[email_attachments]
+other = "Attachments"
+
+[email_download]
+other = "Download"
+
+[email_reply]
+other = "Reply"
+
+[email_reply_all]
+other = "Reply All"
+
+[email_forward]
+other = "Forward"
+
+[email_delete]
+other = "Delete"
+
+[email_mark_read]
+other = "Mark as Read"
+
+[email_mark_unread]
+other = "Mark as Unread"
+
+# Compose email
+[compose_new_email]
+other = "New Email"
+
+[compose_to]
+other = "To"
+
+[compose_cc]
+other = "CC"
+
+[compose_bcc]
+other = "BCC"
+
+[compose_subject]
+other = "Subject"
+
+[compose_body]
+other = "Message"
+
+[compose_attach]
+other = "Attach File"
+
+[compose_send]
+other = "Send"
+
+[compose_save_draft]
+other = "Save Draft"
+
+[compose_discard]
+other = "Discard"
+
+# Search
+[search_placeholder]
+other = "Search emails..."
+
+[search_all]
+other = "All"
+
+[search_from]
+other = "From"
+
+[search_to]
+other = "To"
+
+[search_subject_only]
+other = "Subject only"
+
+[search_body]
+other = "Body"
+
+[search_has_attachments]
+other = "Has attachments"
+
+[search_date_from]
+other = "From date"
+
+[search_date_to]
+other = "To date"
+
+[search_no_results]
+other = "No search results"
+
+# Folder management
+[folder_create]
+other = "Create New Folder"
+
+[folder_rename]
+other = "Rename"
+
+[folder_delete]
+other = "Delete"
+
+[folder_name]
+other = "Folder Name"
+
+[folder_confirm_delete]
+other = "Are you sure you want to delete this folder?"
+
+# Settings
+[settings_title]
+other = "Settings"
+
+[settings_language]
+other = "Language"
+
+[settings_theme]
+other = "Theme"
+
+[settings_theme_light]
+other = "Light"
+
+[settings_theme_dark]
+other = "Dark"
+
+[settings_theme_auto]
+other = "Follow system"
+
+[settings_page_size]
+other = "Messages per page"
+
+[settings_save]
+other = "Save"
+
+[settings_cancel]
+other = "Cancel"
+
+# Messages
+[message_sent_success]
+other = "Email sent successfully"
+
+[message_saved_draft]
+other = "Draft saved"
+
+[message_deleted]
+other = "Deleted"
+
+[message_error]
+other = "An error occurred"
+
+[message_connection_error]
+other = "Cannot connect to server"
+
+# Confirmation dialogs
+[confirm_delete_email]
+other = "Are you sure you want to delete this email?"
+
+[confirm_yes]
+other = "Yes"
+
+[confirm_no]
+other = "No"
+
+# Error messages
+[error_404]
+other = "Page not found"
+
+[error_500]
+other = "Server error occurred"
+
+[error_network]
+other = "Network error"
+
+[error_invalid_email]
+other = "Please enter a valid email address"
+
+[error_required_field]
+other = "This field is required"
+
+# Time expressions
+[time_just_now]
+other = "Just now"
+
+[time_minutes_ago]
+one = "{{.Count}} minute ago"
+other = "{{.Count}} minutes ago"
+
+[time_hours_ago]
+one = "{{.Count}} hour ago"
+other = "{{.Count}} hours ago"
+
+[time_days_ago]
+one = "{{.Count}} day ago"
+other = "{{.Count}} days ago"
+
+# Thread display
+[thread_messages]
+one = "{{.Count}} message"
+other = "{{.Count}} messages"
+
+[thread_expand]
+other = "Expand thread"
+
+[thread_collapse]
+other = "Collapse thread"

@@ -5,35 +5,37 @@ import (
 	"time"
 )
 
+// Email represents an email message
 type Email struct {
-	ID             string        `json:"id"`
-	From           string        `json:"from"`
-	FromName       string        `json:"fromName,omitempty"`
-	To             string        `json:"to"`
-	ToNames        []string      `json:"toNames,omitempty"`
-	Cc             string        `json:"cc,omitempty"`
-	Subject        string        `json:"subject"`
-	Preview        string        `json:"preview"`
-	Body           string        `json:"body"` // Plain text
-	HTML           template.HTML // Not string
-	Date           time.Time     `json:"date"`
-	HasAttachments bool          `json:"hasAttachments"`
-	Flags          []string      `json:"flags,omitempty"`
-	Attachments    []Attachment  `json:"attachments,omitempty"`
+	ID              string        `json:"id"`
+	From            string        `json:"from"`
+	FromName        string        `json:"from_name"`
+	To              string        `json:"to"`
+	ToNames         []string      `json:"to_names"`
+	Cc              string        `json:"cc"`
+	Subject         string        `json:"subject"`
+	Date            time.Time     `json:"date"`
+	Body            string        `json:"body"`
+	HTML            template.HTML `json:"html"`
+	Preview         string        `json:"preview"`
+	Flags           []string      `json:"flags"`
+	Attachments     []Attachment  `json:"attachments"`
+	HasAttachments  bool          `json:"has_attachments"`
+	
+	// Threading fields
+	MessageID       string        `json:"message_id"`
+	InReplyTo       string        `json:"in_reply_to"`
+	References      []string      `json:"references"`
+	ThreadID        string        `json:"thread_id"`
+	
+	// Labels
+	Labels          []Label       `json:"labels"`
 }
 
-// type Attachment struct {
-// 	Filename    string
-// 	ContentType string
-// 	Size        int
-// 	Content     []byte
-// }
-
+// Attachment represents an email attachment
 type Attachment struct {
-	ID          string
-	Filename    string
-	ContentType string
-	Content     []byte
-
-	Size int
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int    `json:"size"`
+	Content     []byte `json:"-"` // Excluded from JSON
 }
