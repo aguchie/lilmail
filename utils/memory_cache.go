@@ -101,10 +101,21 @@ func (c *MemoryCache) Delete(key string) {
 // Clear removes all items from cache
 func (c *MemoryCache) Clear() {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.items = make(map[string]*CacheItem)
-	c.mu.Unlock()
 	
-	// TODO: Clear disk items?
+	if c.diskPath != "" {
+		// Remove all .cache files in directory
+		files, err := os.ReadDir(c.diskPath)
+		if err == nil {
+			for _, file := range files {
+				if filepath.Ext(file.Name()) == ".cache" {
+					os.Remove(filepath.Join(c.diskPath, file.Name()))
+				}
+			}
+		}
+	}
 }
 
 // cleanupLoop periodically removes expired items

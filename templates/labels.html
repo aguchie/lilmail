@@ -1,0 +1,112 @@
+{{define "labels"}}
+<div class="h-[calc(100vh-64px)] flex flex-col overflow-hidden" x-data="{
+    loading: false,
+    labels: [],
+    showCreateModal: false,
+    editingLabel: null,
+    async init() {
+        await this.loadLabels();
+    },
+    async loadLabels() {
+        this.loading = true;
+        try {
+            const response = await fetch('/api/labels', {
+                headers: {
+                    'Authorization': 'Bearer {{.Token}}',
+                    'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content
+                }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                this.labels = data.labels || [];
+            }
+        } catch (e) {
+            console.error('Error loading labels:', e);
+        } finally {
+            this.loading = false;
+        }
+    },
+    async createLabel() {
+        const name = prompt('{{t \" folder_name\"}}:'); if (!name) return; const color=prompt('{{t
+    \"settings_theme\"}}:', '#3b82f6' ); if (!color) return; try { const response=await fetch('/api/labels', {
+    method: 'POST' , headers: { 'Content-Type' : 'application/json' , 'Authorization' : 'Bearer {{.Token}}'
+    , 'X-CSRF-Token' : document.querySelector('meta[name=csrf-token]').content }, body: JSON.stringify({ name, color })
+    }); if (response.ok) { await this.loadLabels(); window.dispatchEvent(new CustomEvent('show-toast', { detail: {
+    type: 'success' , title: '{{t \"message_sent_success\"}}' } })); } else { throw new Error('Failed to create label');
+    } } catch (e) { console.error('Error creating label:', e); window.dispatchEvent(new CustomEvent('show-toast', {
+    detail: { type: 'error' , title: '{{t \"message_error\"}}' } })); } }, async deleteLabel(id) { if (!confirm('{{t
+    \"confirm_delete_email\"}}')) return; try { const response=await fetch(`/api/labels/${id}`, { method: 'DELETE' ,
+    headers: { 'Authorization' : 'Bearer {{.Token}}' , 'X-CSRF-Token' :
+    document.querySelector('meta[name=csrf-token]').content } }); if (response.ok) { await this.loadLabels();
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: { type: 'success' , title: '{{t \"message_deleted\"}}'
+    } })); } else { throw new Error('Failed to delete label'); } } catch (e) { console.error('Error deleting label:',
+    e); window.dispatchEvent(new CustomEvent('show-toast', { detail: { type: 'error' ,
+    title: '{{t \"error_delete_failed\"}}' } })); } } }">
+    <!-- Header -->
+    <div class="bg-white border-b px-6 py-4 flex-shrink-0">
+        <div class="flex items-center justify-between">
+            <h1 class="text-2xl font-semibold text-gray-900">{{t "button_labels"}}</h1>
+            <button @click="createLabel()"
+                class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                {{t "folder_create"}}
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div x-show="loading && labels.length === 0" class="flex-1 flex items-center justify-center">
+        <div class="text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="mt-4 text-sm text-gray-500">{{t "email_loading"}}</p>
+        </div>
+    </div>
+
+    <!-- Labels List -->
+    <div x-show="!loading || labels.length > 0" class="flex-1 overflow-y-auto p-6">
+        <div class="max-w-4xl mx-auto">
+            <template x-if="labels.length === 0">
+                <div class="text-center py-12">
+                    <svg class="w-16 h-16 text-gray-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                    </svg>
+                    <h3 class="mt-4 text-lg font-medium text-gray-900">{{t "email_no_messages"}}</h3>
+                    <p class="mt-1 text-sm text-gray-500">{{t "folder_empty"}}</p>
+                </div>
+            </template>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <template x-for="label in labels" :key="label.id">
+                    <div
+                        class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center gap-2">
+                                <div
+                                    :style="`background-color: ${label.color}; width: 20px; height: 20px; border-radius: 4px;`">
+                                </div>
+                                <h3 class="font-semibold text-gray-900" x-text="label.name"></h3>
+                            </div>
+                            <button @click="deleteLabel(label.id)"
+                                class="text-red-600 hover:bg-red-50 p-1.5 rounded-md transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="text-sm text-gray-500">
+                            <p><span class="font-medium">ID:</span> <span x-text="label.id"></span></p>
+                            <p><span class="font-medium">Color:</span> <span x-text="label.color"></span></p>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    {{template "toast" .}}
+</div>
+{{end}}

@@ -65,6 +65,15 @@ func (h *SettingsHandler) ShowSettings(c *fiber.Ctx) error {
 		labels = []models.Label{}
 	}
 
+	// Get session to retrieve current account ID
+	sess, err := h.store.Get(c)
+	var currentAccountID string
+	if err == nil {
+		if accID := sess.Get("accountId"); accID != nil {
+			currentAccountID, _ = accID.(string)
+		}
+	}
+
 	return c.Render("settings", fiber.Map{
 		"Username": userStr,
 		"User":     user,
@@ -74,7 +83,8 @@ func (h *SettingsHandler) ShowSettings(c *fiber.Ctx) error {
 			"Desktop":  false,
 			"NewEmail": false,
 		},
-		"CSRFToken": c.Locals("csrf"),
+		"CurrentAccountID": currentAccountID,
+		"CSRFToken":        c.Locals("csrf"),
 	})
 }
 

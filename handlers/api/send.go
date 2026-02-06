@@ -1,6 +1,8 @@
 package api
 
 import (
+	"io"
+	"strings"
 	"lilmail/config"
 	"lilmail/utils"
 
@@ -33,15 +35,78 @@ type SendRequest struct {
 }
 
 // HandleSend handles the email send request
+// HandleSend handles the email send request
 func (h *SendHandler) HandleSend(c *fiber.Ctx) error {
-	var req SendRequest
-	if err := c.BodyParser(&req); err != nil {
-		return utils.BadRequestError("Invalid request", err)
+	var to, cc, bcc, subject, body string
+	var isHTML bool
+	var attachments []AttachmentData
+
+	contentType := c.Get("Content-Type")
+
+	if strings.Contains(contentType, "multipart/form-data") {
+		// Handle Multipart Form (for attachments)
+		form, err := c.MultipartForm()
+		if err != nil {
+			return utils.BadRequestError("Invalid form data", err)
+		}
+
+		// Get standard fields
+		if v, ok := form.Value["to"]; ok && len(v) > 0 { to = v[0] }
+		if v, ok := form.Value["cc"]; ok && len(v) > 0 { cc = v[0] }
+		if v, ok := form.Value["bcc"]; ok && len(v) > 0 { bcc = v[0] }
+		if v, ok := form.Value["subject"]; ok && len(v) > 0 { subject = v[0] }
+		if v, ok := form.Value["body"]; ok && len(v) > 0 { body = v[0] }
+		if v, ok := form.Value["is_html"]; ok && len(v) > 0 { isHTML = v[0] == "true" }
+
+		// Process attachments
+		for _, files := range form.File {
+			for _, file := range files {
+				// Open file
+				f, err := file.Open()
+				if err != nil {
+					utils.Log.Error("Failed to open attachment: %v", err)
+					continue
+				}
+				defer f.Close()
+
+				// Read content
+				data, err := io.ReadAll(f)
+				if err != nil {
+					utils.Log.Error("Failed to read attachment: %v", err)
+					continue
+				}
+
+				// Create attachment data
+				att := AttachmentData{
+					Filename:    file.Filename,
+					ContentType: file.Header.Get("Content-Type"),
+					Data:        data,
+				}
+				if att.ContentType == "" {
+					att.ContentType = DetectContentType(file.Filename)
+				}
+
+				attachments = append(attachments, att)
+			}
+		}
+
+	} else {
+		// Handle JSON (legacy/no-attachment)
+		var req SendRequest
+		if err := c.BodyParser(&req); err != nil {
+			return utils.BadRequestError("Invalid request", err)
+		}
+		to = req.To
+		cc = req.Cc
+		bcc = req.Bcc
+		subject = req.Subject
+		body = req.Body
+		isHTML = req.IsHTML
 	}
 
 	// Validate required fields
-	if req.To == "" || req.Subject == "" || req.Body == "" {
-		return utils.BadRequestError("Missing required fields", nil)
+	if to == "" || subject == "" {
+		return utils.BadRequestError("Missing required fields (to, subject)", nil)
 	}
 
 	// Get session credentials
@@ -50,8 +115,7 @@ func (h *SendHandler) HandleSend(c *fiber.Ctx) error {
 		return utils.UnauthorizedError("Invalid session", err)
 	}
 
-	// Create SMTP client using the existing implementation
-	// Note: Credentials has IMAPServer/IMAPPort, we need to use config or get from account
+	// Create SMTP client
 	smtpClient := NewSMTPClient(
 		h.config.SMTP.Server,
 		h.config.SMTP.Port,
@@ -59,13 +123,13 @@ func (h *SendHandler) HandleSend(c *fiber.Ctx) error {
 		credentials.Password,
 	)
 
-	// Send email using the existing SendMail method
-	err = smtpClient.SendMail(req.To, req.Subject, req.Body, req.IsHTML, nil)
+	// Send email
+	err = smtpClient.SendMail(to, cc, bcc, subject, body, isHTML, attachments)
 	if err != nil {
 		return utils.InternalServerError("Failed to send email", err)
 	}
 
-	utils.Log.Info("Email sent successfully: to=%s subject=%s", req.To, req.Subject)
+	utils.Log.Info("Email sent successfully: to=%s subject=%s attachments=%d", to, subject, len(attachments))
 
 	return c.JSON(fiber.Map{
 		"success": true,

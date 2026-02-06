@@ -6,6 +6,7 @@ import (
 	"io"
 	"lilmail/config"
 	"lilmail/handlers/api"
+	"lilmail/storage"
 	"lilmail/utils"
 	"log"
 	"net/url"
@@ -17,18 +18,20 @@ import (
 )
 
 type EmailHandler struct {
-	store  *session.Store
-	config *config.Config
-	auth   *AuthHandler
-	notify *api.NotificationHandler
+	store         *session.Store
+	config        *config.Config
+	auth          *AuthHandler
+	notify        *api.NotificationHandler
+	threadStorage *storage.ThreadStorage
 }
 
-func NewEmailHandler(store *session.Store, config *config.Config, auth *AuthHandler, notify *api.NotificationHandler) *EmailHandler {
+func NewEmailHandler(store *session.Store, config *config.Config, auth *AuthHandler, notify *api.NotificationHandler, threadStorage *storage.ThreadStorage) *EmailHandler {
 	return &EmailHandler{
-		store:  store,
-		config: config,
-		auth:   auth,
-		notify: notify,
+		store:         store,
+		config:        config,
+		auth:          auth,
+		notify:        notify,
+		threadStorage: threadStorage,
 	}
 }
 
@@ -71,6 +74,15 @@ func (h *EmailHandler) HandleInbox(c *fiber.Ctx) error {
 	// Get email from session for UI
 	sess, _ := h.store.Get(c)
 	email := sess.Get("email")
+	
+	// Get UserID from session for storage
+	var userID string
+	if uid := sess.Get("userId"); uid != nil {
+		userID = uid.(string)
+	} else {
+		// Fallback to username if userId not set (should be set in auth)
+		userID = userStr
+	}
 
 	// Parse page number
 	page := 1
@@ -83,9 +95,23 @@ func (h *EmailHandler) HandleInbox(c *fiber.Ctx) error {
 
 	if isThreaded {
 		// Fetch threaded messages
-		threads, err := client.FetchThreads("INBOX", 100) // Threading might need its own pagination? Kept as is for now as per instructions to focus on basic pagination
-		if err != nil {
-			return c.Status(500).SendString("Error fetching threads")
+		// 1. Try to get from storage first
+		threads, err := h.threadStorage.GetThreadsByFolder(userID, "INBOX")
+		
+		// If cache miss or empty, fetch from IMAP
+		if err != nil || len(threads) == 0 {
+			apiThreads, err := client.FetchThreads("INBOX", 100) // Threading currently fetches recent 100
+			if err != nil {
+				return c.Status(500).SendString("Error fetching threads")
+			}
+			
+			// Save to storage
+			for _, t := range apiThreads {
+				t.UserID = userID
+				t.Folder = "INBOX"
+				h.threadStorage.SaveThread(t)
+			}
+			threads = apiThreads
 		}
 
 		return c.Render("inbox", fiber.Map{
@@ -163,6 +189,15 @@ func (h *EmailHandler) HandleFolder(c *fiber.Ctx) error {
 	// Get email from session for UI
 	sess, _ := h.store.Get(c)
 	email := sess.Get("email")
+	
+	// Get UserID from session for storage
+	var userID string
+	if uid := sess.Get("userId"); uid != nil {
+		userID = uid.(string)
+	} else {
+		// Fallback to username if userId not set
+		userID = userStr
+	}
 
 	// Parse page number
 	page := 1
@@ -175,9 +210,23 @@ func (h *EmailHandler) HandleFolder(c *fiber.Ctx) error {
 
 	if isThreaded {
 		// Fetch threaded messages
-		threads, err := client.FetchThreads(folderName, 100)
-		if err != nil {
-			return c.Status(500).SendString("Error fetching threads")
+		// 1. Try to get from storage first
+		threads, err := h.threadStorage.GetThreadsByFolder(userID, folderName)
+		
+		// If cache miss or empty, fetch from IMAP
+		if err != nil || len(threads) == 0 {
+			apiThreads, err := client.FetchThreads(folderName, 100)
+			if err != nil {
+				return c.Status(500).SendString("Error fetching threads")
+			}
+			
+			// Save to storage
+			for _, t := range apiThreads {
+				t.UserID = userID
+				t.Folder = folderName
+				h.threadStorage.SaveThread(t)
+			}
+			threads = apiThreads
 		}
 
 		return c.Render("inbox", fiber.Map{
@@ -303,6 +352,11 @@ func (h *EmailHandler) HandleDeleteEmail(c *fiber.Ctx) error {
 		})
 	}
 
+	// Notify
+	if userID, ok := c.Locals("username").(string); ok {
+		h.notify.NotifyEmailDeleted(userID, emailID)
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Email deleted successfully",
@@ -348,6 +402,11 @@ func (h *EmailHandler) HandleMarkRead(c *fiber.Ctx) error {
 		})
 	}
 
+	// Notify
+	if userID, ok := c.Locals("username").(string); ok {
+		h.notify.NotifyStatusChange(userID, emailID, "read")
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Email marked as read",
@@ -391,6 +450,11 @@ func (h *EmailHandler) HandleMarkUnread(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{
 			"error": fmt.Sprintf("Error marking email as unread: %v", err),
 		})
+	}
+
+	// Notify
+	if userID, ok := c.Locals("username").(string); ok {
+		h.notify.NotifyStatusChange(userID, emailID, "unread")
 	}
 
 	return c.JSON(fiber.Map{
@@ -468,11 +532,13 @@ func (h *EmailHandler) HandleComposeEmail(c *fiber.Ctx) error {
 	// Default max memory is 32MB
 	form, err := c.MultipartForm()
 	
-	var to, subject, body string
+	var to, cc, bcc, subject, body string
 	var isHTML bool
 
 	if err == nil && form != nil {
 		if v, ok := form.Value["to"]; ok && len(v) > 0 { to = v[0] }
+		if v, ok := form.Value["cc"]; ok && len(v) > 0 { cc = v[0] }
+		if v, ok := form.Value["bcc"]; ok && len(v) > 0 { bcc = v[0] }
 		if v, ok := form.Value["subject"]; ok && len(v) > 0 { subject = v[0] }
 		if v, ok := form.Value["body"]; ok && len(v) > 0 { body = v[0] }
 		if v, ok := form.Value["is_html"]; ok && len(v) > 0 { 
@@ -485,6 +551,8 @@ func (h *EmailHandler) HandleComposeEmail(c *fiber.Ctx) error {
 		// Let's support both.
 		type ComposeRequest struct {
 			To      string `json:"to"`
+			Cc      string `json:"cc"`
+			Bcc     string `json:"bcc"`
 			Subject string `json:"subject"`
 			Body    string `json:"body"`
 			IsHTML  bool   `json:"is_html"`
@@ -492,12 +560,16 @@ func (h *EmailHandler) HandleComposeEmail(c *fiber.Ctx) error {
 		var req ComposeRequest
 		if err := c.BodyParser(&req); err == nil && req.To != "" {
 			to = req.To
+			cc = req.Cc
+			bcc = req.Bcc
 			subject = req.Subject
 			body = req.Body
 			isHTML = req.IsHTML
 		} else {
 			// Try FormValue fallback
 			to = c.FormValue("to")
+			cc = c.FormValue("cc")
+			bcc = c.FormValue("bcc")
 			subject = c.FormValue("subject")
 			body = c.FormValue("body")
 			isHTML = c.FormValue("is_html") == "true"
@@ -560,7 +632,7 @@ func (h *EmailHandler) HandleComposeEmail(c *fiber.Ctx) error {
 	}
 
 	// Send the email
-	err = smtpClient.SendMail(to, subject, body, isHTML, attachments)
+	err = smtpClient.SendMail(to, cc, bcc, subject, body, isHTML, attachments)
 	if err != nil {
 		log.Printf("Email sending error: %v", err)
 		return c.Status(500).JSON(fiber.Map{

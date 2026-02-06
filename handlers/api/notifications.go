@@ -26,7 +26,8 @@ type Notification struct {
 // NotificationHandler handles real-time notifications using SSE
 type NotificationHandler struct {
 	store       *session.Store
-	subscribers map[string]chan Notification
+	// Map userID to map of subscriberID to channel
+	subscribers map[string]map[string]chan Notification
 	mu          sync.RWMutex
 }
 
@@ -34,7 +35,7 @@ type NotificationHandler struct {
 func NewNotificationHandler(store *session.Store) *NotificationHandler {
 	return &NotificationHandler{
 		store:       store,
-		subscribers: make(map[string]chan Notification),
+		subscribers: make(map[string]map[string]chan Notification),
 	}
 }
 
@@ -51,26 +52,40 @@ func (h *NotificationHandler) HandleSSE(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.UnauthorizedError("Invalid session", err)
 	}
+
+	// Identify User
+	userID, ok := c.Locals("username").(string)
+	if !ok || userID == "" {
+		return utils.UnauthorizedError("User not authenticated", nil)
+	}
 	
 	// Create channel for this subscriber
 	subscriberID := uuid.New().String()
 	messageChan := make(chan Notification, 10)
 	
 	h.mu.Lock()
-	h.subscribers[subscriberID] = messageChan
+	if _, ok := h.subscribers[userID]; !ok {
+		h.subscribers[userID] = make(map[string]chan Notification)
+	}
+	h.subscribers[userID][subscriberID] = messageChan
 	h.mu.Unlock()
 	
 	// Cleanup on disconnect
 	defer func() {
 		h.mu.Lock()
-		delete(h.subscribers, subscriberID)
+		if subMap, ok := h.subscribers[userID]; ok {
+			delete(subMap, subscriberID)
+			if len(subMap) == 0 {
+				delete(h.subscribers, userID)
+			}
+		}
 		close(messageChan)
 		h.mu.Unlock()
 		
-		utils.Log.Info("SSE subscriber disconnected: %s (token: %s)", subscriberID, token[:8])
+		utils.Log.Info("SSE subscriber disconnected: %s (User: %s, Token: %s)", subscriberID, userID, token[:8])
 	}()
 	
-	utils.Log.Info("SSE subscriber connected: %s", subscriberID)
+	utils.Log.Info("SSE subscriber connected: %s (User: %s)", subscriberID, userID)
 	
 	// Send initial connection message  
 	c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
@@ -102,16 +117,30 @@ func (h *NotificationHandler) HandleSSE(c *fiber.Ctx) error {
 
 // HandleWebSocket handles WebSocket connections for real-time notifications
 func (h *NotificationHandler) HandleWebSocket(c *websocket.Conn) {
+	userID, ok := c.Locals("username").(string)
+	if !ok || userID == "" {
+		c.Close()
+		return
+	}
+
 	subscriberID := uuid.New().String()
 	messageChan := make(chan Notification, 10)
 	
 	h.mu.Lock()
-	h.subscribers[subscriberID] = messageChan
+	if _, ok := h.subscribers[userID]; !ok {
+		h.subscribers[userID] = make(map[string]chan Notification)
+	}
+	h.subscribers[userID][subscriberID] = messageChan
 	h.mu.Unlock()
 	
 	defer func() {
 		h.mu.Lock()
-		delete(h.subscribers, subscriberID)
+		if subMap, ok := h.subscribers[userID]; ok {
+			delete(subMap, subscriberID)
+			if len(subMap) == 0 {
+				delete(h.subscribers, userID)
+			}
+		}
 		close(messageChan)
 		h.mu.Unlock()
 		
@@ -130,30 +159,30 @@ func (h *NotificationHandler) HandleWebSocket(c *websocket.Conn) {
 	}
 }
 
-// BroadcastNotification sends a notification to all subscribers
-func (h *NotificationHandler) BroadcastNotification(notification Notification) {
+// SendNotification sends a notification to a specific user
+func (h *NotificationHandler) SendNotification(userID string, notification Notification) {
 	notification.ID = uuid.New().String()
 	notification.Time = time.Now()
 	
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	
-	utils.Log.Info("Broadcasting notification: type=%s to %d subscribers", notification.Type, len(h.subscribers))
-	
-	for subscriberID, ch := range h.subscribers {
-		select {
-		case ch <- notification:
-			// Sent successfully
-		default:
-			// Channel full, skip this subscriber
-			utils.Log.Warn("Notification channel full for subscriber %s", subscriberID)
+	if subMap, ok := h.subscribers[userID]; ok {
+		utils.Log.Info("Sending notification: type=%s to User %s (%d sessions)", notification.Type, userID, len(subMap))
+		for _, ch := range subMap {
+			select {
+			case ch <- notification:
+				// Sent successfully
+			default:
+				// Channel full, skip
+			}
 		}
 	}
 }
 
 // NotifyNewEmail sends a notification for a new email
-func (h *NotificationHandler) NotifyNewEmail(from, subject string) {
-	h.BroadcastNotification(Notification{
+func (h *NotificationHandler) NotifyNewEmail(userID, from, subject string) {
+	h.SendNotification(userID, Notification{
 		Type:    "new_email",
 		Message: "New email received",
 		Data: map[string]interface{}{
@@ -164,8 +193,8 @@ func (h *NotificationHandler) NotifyNewEmail(from, subject string) {
 }
 
 // NotifyEmailDeleted sends a notification for a deleted email
-func (h *NotificationHandler) NotifyEmailDeleted(emailID string) {
-	h.BroadcastNotification(Notification{
+func (h *NotificationHandler) NotifyEmailDeleted(userID, emailID string) {
+	h.SendNotification(userID, Notification{
 		Type:    "deleted",
 		Message: "Email deleted",
 		Data: map[string]interface{}{
@@ -175,8 +204,8 @@ func (h *NotificationHandler) NotifyEmailDeleted(emailID string) {
 }
 
 // NotifyStatusChange sends a notification for an email status change
-func (h *NotificationHandler) NotifyStatusChange(emailID, status string) {
-	h.BroadcastNotification(Notification{
+func (h *NotificationHandler) NotifyStatusChange(userID, emailID, status string) {
+	h.SendNotification(userID, Notification{
 		Type:    "status_change",
 		Message: "Email status changed",
 		Data: map[string]interface{}{

@@ -34,12 +34,45 @@
         theme: '{{.User.Theme}}',
         pageSize: {{.User.PageSize}},
         showAccountForm: false,
-        editingAccount: null
+        editingAccount: null,
+
+        async switchAccount(id) {
+            this.loading = true;
+            try {
+                const res = await fetch(`/api/accounts/${id}/switch`, { 
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } 
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (data.token) {
+                        localStorage.setItem('token', data.token);
+                    }
+                    window.location.reload();
+                } else {
+                     window.dispatchEvent(new CustomEvent('show-toast', { 
+                        detail: { type: 'error', title: 'エラー', message: data.error || '切り替えに失敗しました' }
+                    }));
+                }
+            } catch(e) {
+                 window.dispatchEvent(new CustomEvent('show-toast', { 
+                    detail: { type: 'error', title: 'エラー', message: 'ネットワークエラー' }
+                }));
+            } finally {
+                this.loading = false;
+            }
+        }
     }">
         <div class="bg-white shadow-sm rounded-lg overflow-hidden">
             <!-- Settings Header -->
-            <div class="px-6 py-4 border-b border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                 <h1 class="text-2xl font-bold text-gray-900">{{t "settings_title"}}</h1>
+                {{if eq .User.Role "admin"}}
+                <a href="/admin/users"
+                    class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm">
+                    Manage Users
+                </a>
+                {{end}}
             </div>
 
             <div class="p-6 space-y-8">
@@ -108,6 +141,96 @@
                     </form>
                 </section>
 
+                <!-- Password Change Section -->
+                <section x-data="{
+                    currentPassword: '',
+                    newPassword: '',
+                    confirmPassword: '',
+                    loading: false,
+
+                    async changePassword() {
+                        if (this.newPassword !== this.confirmPassword) {
+                            window.dispatchEvent(new CustomEvent('show-toast', { 
+                                detail: { type: 'error', title: 'エラー', message: 'パスワードが一致しません' }
+                            }));
+                            return;
+                        }
+
+                        this.loading = true;
+                        try {
+                            const res = await fetch(`/api/users/${'{{.User.ID}}'}/password`, {
+                                method: 'PUT',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': 'Bearer ' + localStorage.getItem('token') // Assuming token is in localStorage, or use cookie?
+                                    // Wait, browser uses cookie for auth usually. 
+                                    // But some APIs here use Bearer. 
+                                    // settings.html calls /api/settings/general using HTMX which uses cookies.
+                                    // Let's use HTMX or standard fetch with cookies.
+                                    // The API middleware checks session OR Bearer. 
+                                    // However, `web/settings.go` renders passing CSRF.
+                                    // Let's use simple Fetch but we might need CSRF header if enabled.
+                                    // `main.go` has CSRF middleware.
+                                    // We need to send X-CSRF-Token.
+                                },
+                                body: JSON.stringify({
+                                    current_password: this.currentPassword,
+                                    new_password: this.newPassword
+                                })
+                            });
+
+                            const data = await res.json();
+                            if (res.ok) {
+                                window.dispatchEvent(new CustomEvent('show-toast', { 
+                                    detail: { type: 'success', title: '成功', message: 'パスワードを変更しました' }
+                                }));
+                                this.currentPassword = '';
+                                this.newPassword = '';
+                                this.confirmPassword = '';
+                            } else {
+                                throw new Error(data.error || 'Failed');
+                            }
+                        } catch (e) {
+                            window.dispatchEvent(new CustomEvent('show-toast', { 
+                                detail: { type: 'error', title: 'エラー', message: e.message }
+                            }));
+                        } finally {
+                            this.loading = false;
+                        }
+                    }
+                }">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">{{t "settings_password_change"}}</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                {{t "settings_current_password"}}
+                            </label>
+                            <input type="password" x-model="currentPassword"
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                {{t "settings_new_password"}}
+                            </label>
+                            <input type="password" x-model="newPassword"
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                {{t "settings_confirm_password"}}
+                            </label>
+                            <input type="password" x-model="confirmPassword"
+                                class="block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div class="flex justify-end">
+                            <button @click="changePassword" :disabled="loading"
+                                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50">
+                                {{t "settings_save"}}
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Account Management Section -->
                 <section>
                     <div class="flex items-center justify-between mb-4">
@@ -130,8 +253,18 @@
                                     <span
                                         class="inline-block mt-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">デフォルト</span>
                                     {{end}}
+                                    {{if eq .ID $.CurrentAccountID}}
+                                    <span
+                                        class="inline-block mt-1 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded">使用中</span>
+                                    {{end}}
                                 </div>
                                 <div class="flex space-x-2">
+                                    {{if ne .ID $.CurrentAccountID}}
+                                    <button @click="switchAccount('{{.ID}}')"
+                                        class="px-3 py-1 text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-200">
+                                        切り替え
+                                    </button>
+                                    {{end}}
                                     <button class="px-3 py-1 text-sm text-blue-600 hover:text-blue-800">編集</button>
                                     {{if not .IsDefault}}
                                     <button

@@ -282,6 +282,146 @@ const EmailActions = {
     }
 };
 
+// Notification Manager
+class NotificationManager {
+    constructor() {
+        this.connected = false;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.init();
+    }
+
+    init() {
+        if (!window.EventSource) {
+            console.warn('SSE not supported');
+            return;
+        }
+
+        this.connect();
+    }
+
+    connect() {
+        // Close existing connection if any
+        if (this.evtSource) {
+            this.evtSource.close();
+        }
+
+        this.evtSource = new EventSource('/events');
+
+        this.evtSource.onopen = () => {
+            console.log('SSE Connected');
+            this.connected = true;
+            this.reconnectAttempts = 0;
+        };
+
+        this.evtSource.onmessage = (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                this.handleNotification(data);
+            } catch (err) {
+                console.error('Error parsing notification:', err);
+            }
+        };
+
+        this.evtSource.onerror = (e) => {
+            // EventSource error often happens on disconnect or network issue
+            // Check readyState: 0=CONNECTING, 1=OPEN, 2=CLOSED
+            if (this.evtSource.readyState === 2) {
+                console.log('SSE connection closed');
+            } else {
+                console.error('SSE Error:', e);
+            }
+
+            this.connected = false;
+            this.evtSource.close();
+
+            // Reconnect with exponential backoff
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                const timeout = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+                this.reconnectAttempts++;
+                console.log(`Reconnecting in ${timeout}ms...`);
+                setTimeout(() => this.connect(), timeout);
+            }
+        };
+    }
+
+    handleNotification(notification) {
+        console.log('Received notification:', notification);
+
+        // Use i18n if available
+        const t = (key, defaultText) => window.i18n ? window.i18n.t(key, defaultText) : defaultText;
+
+        switch (notification.type) {
+            case 'new_email':
+                // Show toast
+                const from = notification.data?.from || 'Unknown';
+                const subject = notification.data?.subject || 'No Subject';
+                toastManager.show(`${t('new_email', 'New Email')}: ${from} - ${subject}`, 'info', 5000);
+
+                // Optional: Trigger HTMX refresh for Inbox if needed
+                // For now just toast is enough as per requirements
+                break;
+
+            case 'deleted':
+                const deletedId = notification.data?.email_id;
+                if (deletedId) {
+                    // Remove from list if present in DOM
+                    const el = document.querySelector(`[data-email-id="${deletedId}"]`);
+                    // Or if thread view
+                    const threadEl = document.querySelector(`[data-thread-id="${deletedId}"]`); // Assuming thread ID matches or we handle it
+
+                    if (el) {
+                        el.remove();
+                        // Also show toast if it wasn't us who deleted it (hard to distinguish here without more data, but acceptable)
+                        // toastManager.show(t('notification_email_deleted_remote', 'Email deleted elsewhere'), 'info');
+                    }
+                }
+                break;
+
+            case 'status_change':
+                const emailId = notification.data?.email_id;
+                const status = notification.data?.status; // "read" or "unread"
+                if (emailId && status) {
+                    // Update email list item style
+                    // Note: .email-item might have .unread class
+                    const el = document.querySelector(`[data-email-id="${emailId}"]`);
+                    if (el) {
+                        // Check structure of email item in templates/partials/email-list.html
+                        // It usually has class "email-item unread"
+                        const itemDiv = el.querySelector('.email-item') || el; // Depending on where data-email-id is placed
+
+                        // Actually in email-list.html: <div class="hover:bg-gray-50..." ...> <div class="px-4 py-3"> ... <span ... fontWeight ...>
+                        // Wait, in email-list.html:
+                        // <div ... hx-get... @click...> <div class="px-4 py-3"> <div ...> <span class="font-medium ...">
+                        // It doesn't use "unread" class explicitly in the partial snippet I saw earlier (Step 36 lines 186+).
+                        // Ah, Step 36 lines 186-202: It uses standard tailwind classes.
+                        // Wait, how is "unread" style applied? 
+                        // I need to check `email-list.html` again. 
+                        // Step 36 lines 186-202 seem to NOT have conditional bolding for unread?
+                        // "span class='font-medium text-gray-900 truncate'" (Line 194)
+                        // "h3 class='text-sm font-semibold text-gray-900 ...'" (Line 197)
+
+                        // Check `templates/partials/email-list.html` to be sure. 
+                        // Or `handlers/web/email.go` logic passing `Emails`.
+
+                        if (status === 'read') {
+                            itemDiv.classList.remove('font-bold', 'unread'); // Remove potential unread classes
+                            itemDiv.classList.add('read');
+                            // Find subject/sender to un-bold if needed
+                            const subject = itemDiv.querySelector('.email-subject, h3');
+                            if (subject) subject.classList.remove('font-bold', 'font-semibold');
+                        } else {
+                            itemDiv.classList.add('unread');
+                            const subject = itemDiv.querySelector('.email-subject, h3');
+                            if (subject) subject.classList.add('font-semibold');
+                        }
+                    }
+                }
+                break;
+        }
+    }
+}
+
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize theme manager
@@ -289,6 +429,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize toast manager
     window.toastManager = new ToastManager();
+
+    // Initialize notification manager
+    window.notificationManager = new NotificationManager();
 
     // Initialize email viewer manager (mobile)
     if (window.innerWidth < 768) {
@@ -302,9 +445,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (csrfToken) {
             evt.detail.headers['X-CSRF-Token'] = csrfToken;
         }
-
-        // Add Authorization (existing code in main.html script might handle this, but safe to double check)
-        // Note: main.html has a configRequest listener too.
     });
 
     document.body.addEventListener('htmx:afterSwap', (event) => {

@@ -1,0 +1,132 @@
+{{define "drafts"}}
+<div class="h-[calc(100vh-64px)] flex flex-col overflow-hidden" x-data="{
+    loading: false,
+    drafts: [],
+    async init() {
+        await this.loadDrafts();
+    },
+    async loadDrafts() {
+        this.loading = true;
+        try {
+            const response = await fetch('/api/drafts', {
+                headers: {
+                    'Authorization': 'Bearer {{.Token}}',
+                    'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content
+                }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                this.drafts = data.drafts || [];
+            } else {
+                console.error('Failed to load drafts');
+            }
+        } catch (e) {
+            console.error('Error loading drafts:', e);
+        } finally {
+            this.loading = false;
+        }
+    },
+    async deleteDraft(id) {
+        if (!confirm('{{t \" confirm_delete_email\"}}')) { return; } try { const response=await
+    fetch(`/api/drafts/${id}`, { method: 'DELETE' , headers: { 'Authorization' : 'Bearer {{.Token}}' , 'X-CSRF-Token' :
+    document.querySelector('meta[name=csrf-token]').content } }); if (response.ok) { await this.loadDrafts(); if
+    (window.dispatchEvent) { window.dispatchEvent(new CustomEvent('show-toast', { detail: { type: 'success' ,
+    title: '{{t \"message_deleted\"}}' } })); } } else { throw new Error('Failed to delete draft'); } } catch (e) {
+    console.error('Error deleting draft:', e); if (window.dispatchEvent) { window.dispatchEvent(new
+    CustomEvent('show-toast', { detail: { type: 'error' , title: '{{t \"error_delete_failed\"}}' } })); } } }, async
+    editDraft(draft) { // Open compose modal with draft data window.dispatchEvent(new
+    CustomEvent('open-compose-with-data', { detail: { id: draft.id, to: draft.to, cc: draft.cc, bcc: draft.bcc, subject:
+    draft.subject, body: draft.body, is_html: draft.is_html } })); } }">
+    <!-- Header -->
+    <div class="bg-white border-b px-6 py-4 flex-shrink-0">
+        <div class="flex items-center justify-between">
+            <h1 class="text-2xl font-semibold text-gray-900">{{t "nav_drafts"}}</h1>
+            <button @click="loadDrafts()" :disabled="loading"
+                class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
+                <span x-show="!loading">{{t "settings_save"}}</span>
+                <span x-show="loading" class="flex items-center">
+                    <svg class="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
+                    </svg>
+                    {{t "email_loading"}}
+                </span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div x-show="loading && drafts.length === 0" class="flex-1 flex items-center justify-center">
+        <div class="text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="mt-4 text-sm text-gray-500">{{t "email_loading"}}</p>
+        </div>
+    </div>
+
+    <!-- Drafts List -->
+    <div x-show="!loading || drafts.length > 0" class="flex-1 overflow-y-auto">
+        <template x-if="drafts.length === 0">
+            <div class="flex flex-col items-center justify-center h-full">
+                <svg class="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium text-gray-900">{{t "email_no_messages"}}</h3>
+                <p class="mt-1 text-sm text-gray-500">{{t "folder_empty"}}</p>
+            </div>
+        </template>
+
+        <div class="p-4 space-y-3">
+            <template x-for="draft in drafts" :key="draft.id">
+                <div class="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow p-4">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1 min-w-0 cursor-pointer" @click="editDraft(draft)">
+                            <div class="flex items-center space-x-2 mb-2">
+                                <span
+                                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    {{t "nav_drafts"}}
+                                </span>
+                                <span class="text-sm text-gray-500"
+                                    x-text="new Date(draft.updated_at).toLocaleString()"></span>
+                            </div>
+                            <div class="mb-2">
+                                <p class="text-sm text-gray-600">
+                                    <span class="font-medium">{{t "email_to"}}:</span>
+                                    <span x-text="draft.to || '{{t \" email_no_messages\"}}'"></span>
+                                </p>
+                            </div>
+                            <h3 class="text-base font-semibold text-gray-900 mb-1" x-text="draft.subject || '({{t \"
+                                compose_subject\"}})'"></h3>
+                            <p class="text-sm text-gray-600 line-clamp-2"
+                                x-text="draft.body ? draft.body.substring(0, 150) + '...' : ''"></p>
+                        </div>
+                        <div class="ml-4 flex-shrink-0 flex space-x-2">
+                            <button @click="editDraft(draft)"
+                                class="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors" :title="'Edit'">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                            </button>
+                            <button @click="deleteDraft(draft.id)"
+                                class="p-2 text-red-600 hover:bg-red-50 rounded-md transition-colors" :title="'{{t \"
+                                email_delete\"}}'">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    {{template "compose-modal" .}}
+    {{template "toast" .}}
+</div>
+{{end}}

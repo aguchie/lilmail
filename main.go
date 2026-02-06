@@ -173,19 +173,18 @@ func main() {
 	})
 
 	// Initialize storage layers
-	accountStorage, err := storage.NewAccountStorage("./data")
+	db, err := storage.InitDB("./data")
 	if err != nil {
-		utils.Log.Error("Failed to initialize account storage: %v", err)
+		utils.Log.Error("Failed to initialize database: %v", err)
 	}
+	defer db.Close()
 
-	userStorage, err := storage.NewUserStorage("./data")
-	if err != nil {
-		utils.Log.Error("Failed to initialize user storage: %v", err)
-	}
+	accountStorage := storage.NewAccountStorage(db)
+	userStorage := storage.NewUserStorage(db)
 
 	// Web handlers initialized later with NotificationHandler
 
-	_, err = storage.NewThreadStorage("./data")
+	threadStorage, err := storage.NewThreadStorage("./data")
 	if err != nil {
 		utils.Log.Error("Failed to initialize thread storage: %v", err)
 	}
@@ -210,7 +209,8 @@ func main() {
 
 	// Initialize web handlers
 	webAuthHandler := web.NewAuthHandler(store, config, userStorage, accountStorage)
-	webEmailHandler := web.NewEmailHandler(store, config, webAuthHandler, notificationHandler)
+	webEmailHandler := web.NewEmailHandler(store, config, webAuthHandler, notificationHandler, threadStorage)
+	webAdminHandler := web.NewAdminHandler(store, config, userStorage)
 
 	// Public routes
 	app.Get("/login", webAuthHandler.ShowLogin)
@@ -233,14 +233,47 @@ func main() {
 	protected.Get("/events", notificationHandler.HandleSSE)
 	protected.Get("/ws", websocket.New(notificationHandler.HandleWebSocket))
 
-	// Main web routes
-	protected.Get("/", webEmailHandler.HandleInbox)      // Default to inbox
-	protected.Get("/inbox", webEmailHandler.HandleInbox) // Explicit inbox route
+	//Main web routes
+	protected.Get("/", webEmailHandler.HandleInbox)          // Default to inbox
+	protected.Get("/inbox", webEmailHandler.HandleInbox)     // Explicit inbox route
 	protected.Get("/folder/:name", webEmailHandler.HandleFolder)
+	protected.Get("/drafts", func(c *fiber.Ctx) error {
+		username := c.Locals("username")
+		if username == nil {
+			return c.Redirect("/login")
+		}
+		
+		token, _ := api.GetSessionToken(c, store)
+		
+		return c.Render("drafts", fiber.Map{
+			"Username":  username,
+			"Token":     token,
+			"CSRFToken": c.Locals("csrf"),
+		})
+	})
 
 	// Settings page
 	webSettingsHandler := web.NewSettingsHandler(store, config, userStorage, accountStorage, labelStorage)
 	protected.Get("/settings", webSettingsHandler.ShowSettings)
+	protected.Get("/admin/users", webAdminHandler.ShowUsers)
+	
+	webAttachmentHandler := web.NewAttachmentWebHandler(store, config, webAuthHandler)
+	protected.Get("/attachments", webAttachmentHandler.HandleAttachments)
+	
+	protected.Get("/labels", func(c *fiber.Ctx) error {
+		username := c.Locals("username")
+		if username == nil {
+			return c.Redirect("/login")
+		}
+		
+		token, _ := api.GetSessionToken(c, store)
+		
+		return c.Render("labels", fiber.Map{
+			"Username":  username,
+			"Token":     token,
+			"CSRFToken": c.Locals("csrf"),
+		})
+	})
 
 	// API routes
 	apiRoutes := protected.Group("/api")
@@ -251,6 +284,11 @@ func main() {
 		apiRoutes.Put("/email/:id/read", webEmailHandler.HandleMarkRead)
 		apiRoutes.Put("/email/:id/unread", webEmailHandler.HandleMarkUnread)
 		apiRoutes.Post("/email/:id/move", webEmailHandler.HandleMoveEmail)
+
+		// Attachment routes
+		attachmentHandler := api.NewAttachmentHandler(store, config)
+		apiRoutes.Get("/attachments/:email_id/:index/download", attachmentHandler.HandleDownload)
+		apiRoutes.Get("/attachments/:email_id/:index/preview", attachmentHandler.HandlePreview)
 
 		// Reply and forward routes
 		replyHandler := web.NewReplyHandler(store, config, webAuthHandler)
@@ -300,6 +338,14 @@ func main() {
 
 		// Settings routes
 		apiRoutes.Post("/settings/general", webSettingsHandler.UpdateGeneralSettings)
+
+		// User management routes
+		userHandler := api.NewUserHandler(store, config, userStorage)
+		apiRoutes.Get("/users", userHandler.GetUsers)
+		apiRoutes.Put("/users/:id", userHandler.UpdateUser)
+		apiRoutes.Delete("/users/:id", userHandler.DeleteUser)
+		apiRoutes.Post("/users", userHandler.CreateUser)
+		apiRoutes.Put("/users/:id/password", userHandler.UpdatePassword)
 	}
 
 	// HTMX routes (partial template renders)

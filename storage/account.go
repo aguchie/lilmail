@@ -9,38 +9,28 @@ import (
 	"fmt"
 	"io"
 	"lilmail/models"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"go.etcd.io/bbolt"
 )
 
-// AccountStorage manages account data persistence
+// AccountStorage manages account data persistence using BoltDB
 type AccountStorage struct {
-	dataDir string
-	mu      sync.RWMutex
+	db *bbolt.DB
+	mu sync.RWMutex
 }
 
 // NewAccountStorage creates a new account storage instance
-func NewAccountStorage(dataDir string) (*AccountStorage, error) {
-	// Create data directory if it doesn't exist
-	accountDir := filepath.Join(dataDir, "accounts")
-	if err := os.MkdirAll(accountDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create accounts directory: %v", err)
-	}
-
+func NewAccountStorage(db *bbolt.DB) *AccountStorage {
 	return &AccountStorage{
-		dataDir: accountDir,
-	}, nil
+		db: db,
+	}
 }
 
 // CreateAccount creates a new account
 func (s *AccountStorage) CreateAccount(account *models.Account, encryptionKey []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// Generate ID if not set
 	if account.ID == "" {
 		account.ID = uuid.New().String()
@@ -61,16 +51,31 @@ func (s *AccountStorage) CreateAccount(account *models.Account, encryptionKey []
 	storedAccount := *account
 	storedAccount.Password = encryptedPassword
 
-	// Save to file
-	return s.saveAccount(&storedAccount)
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("Accounts"))
+		
+		data, err := json.Marshal(storedAccount)
+		if err != nil {
+			return fmt.Errorf("failed to marshal account: %v", err)
+		}
+
+		return b.Put([]byte(account.ID), data)
+	})
 }
 
 // GetAccount retrieves an account by ID
 func (s *AccountStorage) GetAccount(accountID string, encryptionKey []byte) (*models.Account, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	var account models.Account
 
-	account, err := s.loadAccount(accountID)
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("Accounts"))
+		data := b.Get([]byte(accountID))
+		if data == nil {
+			return errors.New("account not found")
+		}
+		return json.Unmarshal(data, &account)
+	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -82,122 +87,84 @@ func (s *AccountStorage) GetAccount(accountID string, encryptionKey []byte) (*mo
 	}
 	account.Password = decryptedPassword
 
-	return account, nil
+	return &account, nil
 }
 
-// GetAccountsByUser retrieves all accounts for a user
+// GetAccountsByUser retrieves all accounts for a user (Scan)
 func (s *AccountStorage) GetAccountsByUser(userID string, encryptionKey []byte) ([]*models.Account, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	files, err := os.ReadDir(s.dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read accounts directory: %v", err)
-	}
-
 	var accounts []*models.Account
-	for _, file := range files {
-		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
-			continue
-		}
 
-		accountID := file.Name()[:len(file.Name())-5] // Remove .json extension
-		account, err := s.loadAccount(accountID)
-		if err != nil {
-			continue // Skip invalid accounts
-		}
-
-		if account.UserID == userID {
-			// Decrypt password
-			decryptedPassword, err := decrypt(account.Password, encryptionKey)
-			if err != nil {
-				continue // Skip accounts with decryption errors
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("Accounts"))
+		return b.ForEach(func(k, v []byte) error {
+			var account models.Account
+			if err := json.Unmarshal(v, &account); err != nil {
+				return nil // Skip corrupted
 			}
-			account.Password = decryptedPassword
-			accounts = append(accounts, account)
-		}
-	}
+			
+			if account.UserID == userID {
+				// Decrypt password
+				decryptedPassword, err := decrypt(account.Password, encryptionKey)
+				if err != nil {
+					return nil // Skip decryption errors
+				}
+				account.Password = decryptedPassword
+				accounts = append(accounts, &account)
+			}
+			return nil
+		})
+	})
 
+	if err != nil {
+		return nil, err
+	}
 	return accounts, nil
 }
 
 // UpdateAccount updates an existing account
 func (s *AccountStorage) UpdateAccount(account *models.Account, encryptionKey []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("Accounts"))
+		
+		// Check existence and get creation time
+		existingData := b.Get([]byte(account.ID))
+		if existingData == nil {
+			return errors.New("account not found")
+		}
+		var existing models.Account
+		json.Unmarshal(existingData, &existing)
 
-	// Check if account exists
-	existing, err := s.loadAccount(account.ID)
-	if err != nil {
-		return fmt.Errorf("account not found: %v", err)
-	}
+		// Create copy to store
+		toStore := *account
+		toStore.CreatedAt = existing.CreatedAt
+		toStore.UpdatedAt = time.Now()
 
-	// Update timestamp
-	account.UpdatedAt = time.Now()
-	account.CreatedAt = existing.CreatedAt
+		// Encrypt password
+		encryptedPassword, err := encrypt(account.Password, encryptionKey)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt password: %v", err)
+		}
+		toStore.Password = encryptedPassword
 
-	// Encrypt password
-	encryptedPassword, err := encrypt(account.Password, encryptionKey)
-	if err != nil {
-		return fmt.Errorf("failed to encrypt password: %v", err)
-	}
+		data, err := json.Marshal(toStore)
+		if err != nil {
+			return err
+		}
 
-	// Create a copy with encrypted password for storage
-	storedAccount := *account
-	storedAccount.Password = encryptedPassword
-
-	return s.saveAccount(&storedAccount)
+		return b.Put([]byte(account.ID), data)
+	})
 }
 
 // DeleteAccount deletes an account
 func (s *AccountStorage) DeleteAccount(accountID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	accountPath := filepath.Join(s.dataDir, accountID+".json")
-	if err := os.Remove(accountPath); err != nil {
-		if os.IsNotExist(err) {
-			return errors.New("account not found")
-		}
-		return fmt.Errorf("failed to delete account: %v", err)
-	}
-
-	return nil
-}
-
-// saveAccount saves account to file (must be called with lock held)
-func (s *AccountStorage) saveAccount(account *models.Account) error {
-	accountPath := filepath.Join(s.dataDir, account.ID+".json")
-
-	data, err := json.MarshalIndent(account, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal account: %v", err)
-	}
-
-	return os.WriteFile(accountPath, data, 0600)
-}
-
-// loadAccount loads account from file (must be called with lock held)
-func (s *AccountStorage) loadAccount(accountID string) (*models.Account, error) {
-	accountPath := filepath.Join(s.dataDir, accountID+".json")
-
-	data, err := os.ReadFile(accountPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, errors.New("account not found")
-		}
-		return nil, fmt.Errorf("failed to read account file: %v", err)
-	}
-
-	var account models.Account
-	if err := json.Unmarshal(data, &account); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal account: %v", err)
-	}
-
-	return &account, nil
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("Accounts"))
+		return b.Delete([]byte(accountID))
+	})
 }
 
 // encrypt encrypts plaintext using AES-GCM
+// Copied from original file
 func encrypt(plaintext string, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {

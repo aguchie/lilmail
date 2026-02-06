@@ -32,7 +32,7 @@ func NewClient(server string, port int, email, password string) (*Client, error)
 		return nil, fmt.Errorf("login error: %v", err)
 	}
 
-	return &Client{client: c}, nil
+	return &Client{client: c, username: email}, nil
 }
 
 // Close closes the IMAP connection
@@ -126,6 +126,16 @@ func (c *Client) CreateFolder(folderName string) error {
 // DeleteFolder deletes an IMAP folder
 func (c *Client) DeleteFolder(folderName string) error {
 	return c.client.Delete(folderName)
+}
+
+// Select selects a mailbox
+func (c *Client) Select(folderName string, readOnly bool) (*imap.MailboxStatus, error) {
+	return c.client.Select(folderName, readOnly)
+}
+
+// Search searches the mailbox
+func (c *Client) Search(criteria *imap.SearchCriteria) ([]uint32, error) {
+	return c.client.Search(criteria)
 }
 
 // RenameFolder renames an IMAP folder

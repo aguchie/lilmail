@@ -213,6 +213,46 @@
                     {{end}}
                 </div>
                 {{end}}
+
+                <!-- Pagination Controls -->
+                {{if .Pagination}}
+                <div class="border-t border-gray-200 px-4 py-3 bg-gray-50 flex items-center justify-between">
+                    <div class="flex-1 flex items-center justify-between">
+                        <div class="text-sm text-gray-700">
+                            {{t "page_of"}}
+                        </div>
+                        <div class="flex gap-2">
+                            {{if gt .Pagination.CurrentPage 1}}
+                            <a href="?page={{sub .Pagination.CurrentPage 1}}&view={{.ViewMode}}"
+                                class="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                                {{t "button_previous"}}
+                            </a>
+                            {{else}}
+                            <button disabled
+                                class="px-3 py-1.5 text-sm bg-gray-100 border border-gray-300 rounded-md text-gray-400 cursor-not-allowed">
+                                {{t "button_previous"}}
+                            </button>
+                            {{end}}
+
+                            <span class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md">
+                                {{.Pagination.CurrentPage}}
+                            </span>
+
+                            {{if lt .Pagination.CurrentPage .Pagination.TotalPages}}
+                            <a href="?page={{add .Pagination.CurrentPage 1}}&view={{.ViewMode}}"
+                                class="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                                {{t "button_next"}}
+                            </a>
+                            {{else}}
+                            <button disabled
+                                class="px-3 py-1.5 text-sm bg-gray-100 border border-gray-300 rounded-md text-gray-400 cursor-not-allowed">
+                                {{t "button_next"}}
+                            </button>
+                            {{end}}
+                        </div>
+                    </div>
+                </div>
+                {{end}}
             </div>
         </div>
 

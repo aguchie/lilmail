@@ -40,7 +40,7 @@ func NewSMTPClient(server string, port int, email, password string) *SMTPClient 
 }
 
 // SendMail sends an email using SMTP with support for HTML and Attachments
-func (c *SMTPClient) SendMail(to, subject, body string, isHTML bool, attachments []AttachmentData) error {
+func (c *SMTPClient) SendMail(to, cc, bcc, subject, body string, isHTML bool, attachments []AttachmentData) error {
 	// Debug print
 	fmt.Printf("Connecting to %s:%d as %s\n", c.server, c.port, c.email)
 
@@ -79,9 +79,29 @@ func (c *SMTPClient) SendMail(to, subject, body string, isHTML bool, attachments
 		return fmt.Errorf("mail from failed: %v", err)
 	}
 
-	// Set recipient
-	if err = client.Rcpt(to); err != nil {
-		return fmt.Errorf("rcpt to failed: %v", err)
+	// Collect all recipients (To, CC, BCC)
+	var recipients []string
+	
+	// Helper to split and trim
+	addRecipients := func(addrStr string) {
+		parts := strings.Split(addrStr, ",")
+		for _, p := range parts {
+			trimmed := strings.TrimSpace(p)
+			if trimmed != "" {
+				recipients = append(recipients, trimmed)
+			}
+		}
+	}
+
+	addRecipients(to)
+	addRecipients(cc)
+	addRecipients(bcc)
+
+	// Set recipients
+	for _, rcpt := range recipients {
+		if err = client.Rcpt(rcpt); err != nil {
+			return fmt.Errorf("rcpt to %s failed: %v", rcpt, err)
+		}
 	}
 
 	// Send the email body
@@ -99,6 +119,10 @@ func (c *SMTPClient) SendMail(to, subject, body string, isHTML bool, attachments
 	headers["Date"] = now
 	headers["From"] = fmt.Sprintf("%s <%s>", username, c.email)
 	headers["To"] = to
+	if cc != "" {
+		headers["Cc"] = cc
+	}
+	// BCC is usually not added to headers
 	headers["Subject"] = subject
 	headers["MIME-Version"] = "1.0"
 	headers["Message-ID"] = fmt.Sprintf("<%s@%s>", generateMessageID(), domain)

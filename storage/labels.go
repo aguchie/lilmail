@@ -124,16 +124,34 @@ func (s *LabelStorage) GetLabel(id string) (*models.Label, error) {
 // DeleteLabel deletes a label
 func (s *LabelStorage) DeleteLabel(id string) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(labelBucket))
+		// 1. Delete associated email_labels
+		// We need to scan all email_labels to find those with matching LabelID
+		// Since we don't have a secondary index, we must scan.
+		// For a large DB this is slow, but for a personal mail client it's acceptable.
+		// A better approach would be to maintain a reverse index or just leave them (lazy cleanup).
+		// Given the requirement to resolve TODOs, we will implement the cleanup.
 		
-		// Delete logical label
-		if err := b.Delete([]byte(id)); err != nil {
-			return err
+		elb := tx.Bucket([]byte(emailLabelBucket))
+		if elb != nil {
+			c := elb.Cursor()
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				var el models.EmailLabel
+				if err := json.Unmarshal(v, &el); err == nil {
+					if el.LabelID == id {
+						c.Delete()
+					}
+				}
+			}
+		}
+
+		// 2. Delete the label itself
+		lb := tx.Bucket([]byte(labelBucket))
+		if lb != nil {
+			if err := lb.Delete([]byte(id)); err != nil {
+				return err
+			}
 		}
 		
-		// TODO: Also delete associated email_labels? 
-		// For simplicity/performance, we might leave them or clean up lazily.
-		// A full scan to clean up might be expensive.
 		return nil
 	})
 }
